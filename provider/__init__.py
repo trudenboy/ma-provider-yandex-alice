@@ -3,28 +3,47 @@
 Exposes Music Assistant playback to a Yandex Dialogs custom skill — a Russian
 NLU voice control surface invoked via *«Алиса, попроси Music Assistant …»*.
 
-Setup is **manual** in this release:
-1. User creates a custom dialog skill in https://dialogs.yandex.ru/developer
-2. User points the skill's webhook URL at MA's
-   ``/api/yandex_dialogs/webhook/<your-secret>`` endpoint.
-3. User pastes the skill ID, skill token, and webhook secret into the
-   provider's config form.
+Setup paths:
 
-A future release will add an auto-create flow that uses the
-``ya-dialogs-api`` library to register the skill programmatically; for now
-manual setup keeps the v1.0 surface small and reliable.
+1. **Auto** (since v1.1.0): the *«Создать навык»* button kicks off a Yandex
+   Passport Device Flow login and registers the skill in
+   ``https://dialogs.yandex.ru/developer`` programmatically via
+   ``ya-dialogs-api``. The skill ID is auto-populated on success.
+2. **Manual** (still supported): create the skill yourself in the dev console,
+   point its webhook URL at ``/api/yandex_dialogs/webhook/<your-secret>``,
+   and paste the skill ID + token into the form.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import secrets
 from typing import TYPE_CHECKING
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import ConfigEntryType, ProviderFeature
+from ya_dialogs_api import (
+    SkillCreationArtifacts,
+    SkillCreationState,
+    dump_artifacts,
+    load_artifacts,
+)
 
+from .auto_create import (
+    AutoCreateOutcome,
+    LocalAutoCreateStage,
+    run_auto_create_step,
+)
+from .auto_create_view import build_auto_create_entries
+from .auto_update import run_auto_update
 from .constants import (
+    CONF_ACTION_AUTO_CREATE_DIALOG,
+    CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+    CONF_ACTION_RENAME_DIALOG_SKILL,
+    CONF_AUTH_X_TOKEN,
+    CONF_DIALOG_AUTO_CREATE_ARTIFACTS,
+    CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION,
     CONF_DIALOG_SKILL_ENABLED,
     CONF_DIALOG_SKILL_ID,
     CONF_DIALOG_SKILL_NAME,
@@ -39,6 +58,12 @@ from .constants import (
     DIALOG_NAME_MIN_LEN,
     DIALOG_WEBHOOK_BASE_PATH,
     YANDEX_DIALOGS_DEVELOPER_URL,
+)
+from .dialog_skill_meta import (
+    build_activation_phrases,
+    build_backend_uri,
+    build_skill_description,
+    build_structured_examples,
 )
 from .playlists import fetch_playlist_options
 from .plugin import YandexAlicePlugin
@@ -86,22 +111,37 @@ async def _list_player_options(mass: MusicAssistant) -> list[ConfigValueOption]:
     return options
 
 
-async def get_config_entries(
+def _name_drifted(artifacts: SkillCreationArtifacts, skill_name: str) -> bool:
+    """Detect divergence between MA-side `skill_name` and Yandex `last_known_name`."""
+    return bool(
+        artifacts.last_known_name and artifacts.last_known_name.strip() != skill_name.strip()
+    )
+
+
+async def get_config_entries(  # noqa: PLR0915
     mass: MusicAssistant,
     instance_id: str | None = None,
     action: str | None = None,
     values: dict[str, ConfigValueType] | None = None,
 ) -> tuple[ConfigEntry, ...]:
-    """Build the provider config-form entries.
+    """Build the provider config-form entries with auto-create / rename actions.
 
-    Args:
-        mass: MusicAssistant runtime, used to enumerate players/playlists.
-        instance_id: Stable provider instance ID (unused — single-instance).
-        action: Action key when the user clicked a button. Currently unused
-            (auto-create / rename actions ship in a later release).
-        values: Current form values (echoed back across submissions).
+    Action handling:
+
+    - ``CONF_ACTION_AUTO_CREATE_DIALOG`` — advance the Device Flow + skill
+      creation state machine by one external-IO step. Re-click drives further
+      stages (see :mod:`provider.auto_create`).
+    - ``CONF_ACTION_RENAME_DIALOG_SKILL`` — patch the existing skill draft
+      via cached x_token; no Device Flow.
+    - ``CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW`` — drop pending session +
+      reset artifacts; preserve cached x_token.
+
+    Auto-create / rename state lives in three hidden config entries
+    (``CONF_AUTH_X_TOKEN``, ``CONF_DIALOG_AUTO_CREATE_ARTIFACTS``,
+    ``CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION``) that round-trip through the
+    form on every save.
     """
-    _ = instance_id, action
+    _ = instance_id
     values = values or {}
 
     # Generate a webhook secret on first open if the user hasn't set one yet.
@@ -110,8 +150,120 @@ async def get_config_entries(
 
     instance_name = str(values.get(CONF_INSTANCE_NAME) or DIALOG_DEFAULT_NAME)
 
-    # Player options used both by the exposed-players selector and the
-    # exposed-playlists selector below.
+    # ---- Pull persistent auto-create / auth state from values ----
+    artifacts = load_artifacts(str(values.get(CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or "") or None)
+    cached_x_token = str(values.get(CONF_AUTH_X_TOKEN) or "")
+    device_session_blob = str(values.get(CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION) or "")
+
+    # Skill name priority: explicit dialog skill name → instance name → default.
+    skill_name = (
+        str(values.get(CONF_DIALOG_SKILL_NAME) or "").strip()
+        or str(values.get(CONF_INSTANCE_NAME) or "").strip()
+        or DIALOG_DEFAULT_NAME
+    )
+
+    external_base_url = str(values.get(CONF_EXTERNAL_BASE_URL) or "").strip().rstrip("/")
+    webhook_secret = str(values.get(CONF_DIALOG_WEBHOOK_SECRET) or "").strip() or default_secret
+
+    action_outcome: AutoCreateOutcome | None = None
+    update_message: str | None = None
+
+    # ---- Action dispatcher ----
+    if action == CONF_ACTION_AUTO_CREATE_DIALOG:
+        # Treat re-click on DONE as "Re-create" → reset artifacts before stepping.
+        if artifacts.state == SkillCreationState.DONE:
+            artifacts = SkillCreationArtifacts()
+            device_session_blob = ""
+
+        # Backup-restore safety: skill_id is set in config but artifacts are
+        # NONE → pre-position to APP_CREATED so the library skips create_app
+        # and patches the existing skill rather than creating a duplicate.
+        saved_skill_id = str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
+        if saved_skill_id and artifacts.state == SkillCreationState.NONE and not artifacts.skill_id:
+            artifacts = dataclasses.replace(
+                artifacts,
+                state=SkillCreationState.APP_CREATED,
+                skill_id=saved_skill_id,
+            )
+
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            action_outcome = AutoCreateOutcome(
+                artifacts=dataclasses.replace(
+                    artifacts,
+                    state=SkillCreationState.FAILED,
+                    last_error=str(exc),
+                ),
+                device_session_blob=None,
+                x_token=None,
+                user_code=None,
+                verification_url=None,
+                user_message=str(exc),
+                stage=LocalAutoCreateStage.FAILED,
+            )
+        else:
+            action_outcome = await run_auto_create_step(
+                skill_name=skill_name,
+                backend_uri=backend_uri,
+                description=build_skill_description(skill_name),
+                structured_examples=build_structured_examples(skill_name),
+                activation_phrases=build_activation_phrases(skill_name),
+                cached_x_token=cached_x_token or None,
+                pending_device_session_blob=device_session_blob or None,
+                artifacts=artifacts,
+            )
+
+    elif action == CONF_ACTION_RENAME_DIALOG_SKILL:
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            update_message = str(exc)
+            artifacts = dataclasses.replace(
+                artifacts,
+                state=SkillCreationState.FAILED,
+                last_error=str(exc),
+            )
+        else:
+            update_outcome = await run_auto_update(
+                cached_x_token=cached_x_token or None,
+                skill_name=skill_name,
+                backend_uri=backend_uri,
+                description=build_skill_description(skill_name),
+                structured_examples=build_structured_examples(skill_name),
+                activation_phrases=build_activation_phrases(skill_name),
+                artifacts=artifacts,
+            )
+            artifacts = update_outcome.artifacts
+            update_message = update_outcome.user_message
+            if update_outcome.x_token == "":
+                cached_x_token = ""
+
+    elif action == CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW:
+        # Drop pending session + reset artifacts; keep cached x_token.
+        artifacts = SkillCreationArtifacts()
+        device_session_blob = ""
+
+    # ---- Reflect outcome into values so the next form save persists state ----
+    if action_outcome is not None:
+        artifacts = action_outcome.artifacts
+        if action_outcome.device_session_blob is not None:
+            device_session_blob = action_outcome.device_session_blob
+        elif action_outcome.stage in (
+            LocalAutoCreateStage.DONE,
+            LocalAutoCreateStage.FAILED,
+        ):
+            device_session_blob = ""
+        if action_outcome.x_token is not None:
+            cached_x_token = action_outcome.x_token
+
+    values[CONF_DIALOG_AUTO_CREATE_ARTIFACTS] = dump_artifacts(artifacts)
+    values[CONF_AUTH_X_TOKEN] = cached_x_token
+    values[CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION] = device_session_blob
+    if artifacts.state == SkillCreationState.DONE and artifacts.skill_id:
+        values[CONF_DIALOG_SKILL_ID] = artifacts.skill_id
+
+    # ---- Player / playlist options ----
     player_options = await _list_player_options(mass)
     try:
         playlist_options = await fetch_playlist_options(mass)
@@ -125,15 +277,93 @@ async def get_config_entries(
         "Leave empty to use MA's global Base URL setting."
     )
 
+    # ---- Auto-create cluster: status LABEL + auto-create ACTION + Cancel ----
+    auto_create_entries = build_auto_create_entries(
+        artifacts=artifacts,
+        pending_session_present=bool(device_session_blob),
+        cached_x_token_present=bool(cached_x_token),
+        action_outcome=action_outcome,
+    )
+
+    # ---- Rename cluster: drift LABEL (conditional) + Rename ACTION ----
+    rename_entries: tuple[ConfigEntry, ...] = ()
+    rename_visible = bool(artifacts.skill_id and cached_x_token)
+    if rename_visible:
+        drift_text = ""
+        if update_message:
+            drift_text = update_message
+        elif _name_drifted(artifacts, skill_name):
+            drift_text = (
+                f"⚠ Имя в Yandex (`{artifacts.last_known_name}`) отличается "
+                f"от текущего «{skill_name}». Нажмите «Переименовать»."
+            )
+        rename_entries = (
+            *(
+                (
+                    ConfigEntry(
+                        key="label_rename_status",
+                        type=ConfigEntryType.LABEL,
+                        label=drift_text,
+                    ),
+                )
+                if drift_text
+                else ()
+            ),
+            ConfigEntry(
+                key=CONF_ACTION_RENAME_DIALOG_SKILL,
+                type=ConfigEntryType.ACTION,
+                label="Переименовать навык в Yandex",
+                description=(
+                    "Применить текущее значение «Skill name» к существующему "
+                    "навыку в Yandex Dialogs (PATCH draft + re-deploy). "
+                    "Использует кэш x_token, без повторной авторизации."
+                ),
+                action=CONF_ACTION_RENAME_DIALOG_SKILL,
+                action_label="Переименовать",
+                required=False,
+                default_value="",
+            ),
+        )
+
+    # ---- Hidden state-carrier entries (round-trip persistence) ----
+    hidden_state_entries = (
+        ConfigEntry(
+            key=CONF_AUTH_X_TOKEN,
+            type=ConfigEntryType.SECURE_STRING,
+            label="Yandex Passport x_token (cached)",
+            description="Cached after first successful Device Flow.",
+            required=False,
+            default_value=cached_x_token,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_DIALOG_AUTO_CREATE_ARTIFACTS,
+            type=ConfigEntryType.STRING,
+            label="Auto-create artifacts (JSON)",
+            description="State machine snapshot — persisted between clicks.",
+            required=False,
+            default_value=dump_artifacts(artifacts),
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION,
+            type=ConfigEntryType.SECURE_STRING,
+            label="Pending Device Flow session (JSON)",
+            description="Persisted during DEVICE_FLOW_STARTED stage.",
+            required=False,
+            default_value=device_session_blob,
+            hidden=True,
+        ),
+    )
+
     return (
         ConfigEntry(
             key="label_intro",
             type=ConfigEntryType.LABEL,
             label=(
-                "🎙️ Yandex Alice voice control. Create a custom dialog "
-                f"skill at {YANDEX_DIALOGS_DEVELOPER_URL}, point its "
-                "webhook at the URL shown below, and paste the skill ID + "
-                "token from the dev console."
+                "🎙️ Yandex Alice voice control. Use «Создать навык» below "
+                "for one-click registration via Yandex Passport, or set up "
+                f"manually at {YANDEX_DIALOGS_DEVELOPER_URL}."
             ),
         ),
         ConfigEntry(
@@ -151,7 +381,7 @@ async def get_config_entries(
         ConfigEntry(
             key=CONF_EXTERNAL_BASE_URL,
             type=ConfigEntryType.STRING,
-            label="External base URL (optional)",
+            label="External base URL (HTTPS, required for auto-create)",
             description=base_url_hint,
             required=False,
             default_value="",
@@ -161,8 +391,8 @@ async def get_config_entries(
             type=ConfigEntryType.BOOLEAN,
             label="Enable dialog skill",
             description=(
-                "Turn this on once you have created the custom skill in "
-                "the Yandex dev console and pasted the credentials below."
+                "Turn this on once the skill is created (auto or manual) "
+                "and the credentials below are populated."
             ),
             required=False,
             default_value=False,
@@ -170,20 +400,25 @@ async def get_config_entries(
         ConfigEntry(
             key=CONF_DIALOG_SKILL_NAME,
             type=ConfigEntryType.STRING,
-            label="Skill name (informational)",
+            label="Skill name",
             description=(
-                f"Used in UI labels only. Min {DIALOG_NAME_MIN_LEN}, "
-                f"max {DIALOG_NAME_MAX_LEN} characters."
+                "Display name pushed to Yandex Dialogs on auto-create / "
+                "rename. Min "
+                f"{DIALOG_NAME_MIN_LEN}, max {DIALOG_NAME_MAX_LEN} characters."
             ),
             required=False,
             default_value=instance_name,
         ),
+        *auto_create_entries,
+        *rename_entries,
         ConfigEntry(
             key=CONF_DIALOG_SKILL_ID,
             type=ConfigEntryType.STRING,
             label="Skill ID",
             description=(
-                "UUID from the dev console URL (https://dialogs.yandex.ru/developer/skills/<this>)."
+                "UUID of the skill — populated automatically after a "
+                "successful auto-create, or paste manually if you set up "
+                "the skill yourself."
             ),
             required=False,
             default_value="",
@@ -191,9 +426,9 @@ async def get_config_entries(
         ConfigEntry(
             key=CONF_DIALOG_SKILL_TOKEN,
             type=ConfigEntryType.SECURE_STRING,
-            label="Skill OAuth token",
+            label="Skill OAuth token (manual setup only)",
             description=(
-                "OAuth token from "
+                "Optional OAuth token from "
                 "https://oauth.yandex.ru/authorize?response_type=token"
                 "&client_id=c473ca268cd749d3a8371351a8f2bcbd. "
                 "Used to push state callbacks to Yandex (future feature; "
@@ -207,8 +442,7 @@ async def get_config_entries(
             type=ConfigEntryType.SECURE_STRING,
             label="Webhook URL secret",
             description=(
-                "Random secret embedded in the webhook URL. The full URL to "
-                "paste into the dev console's webhook field is "
+                "Random secret embedded in the webhook URL. The full URL is "
                 f"<external_base_url>{DIALOG_WEBHOOK_BASE_PATH}/<this-secret>. "
                 "Pre-filled with a fresh value; click 'Save' to commit."
             ),
@@ -241,4 +475,5 @@ async def get_config_entries(
             required=False,
             default_value=[],
         ),
+        *hidden_state_entries,
     )

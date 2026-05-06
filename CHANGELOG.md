@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-06
+
+### Added
+
+- **«Создать навык» action.** New button in the provider config form that
+  registers a custom Alice skill in `https://dialogs.yandex.ru/developer`
+  programmatically. One UX click drives a state machine: Yandex Passport
+  Device Flow login (display user_code → user confirms on
+  `https://ya.ru/device` → next click polls for confirmation), then a
+  single OAuth-free pipeline call via
+  `ya_dialogs_api.auto_create_skill(channel="aliceSkill", oauth_*=None)`
+  (CSRF fetch → create-app → upload-logo → update-draft → request-deploy).
+  On success the `Skill ID` field is populated automatically.
+
+- **Self-resuming Device Flow UX.** The same auto-create button doubles as
+  «Подтвердить и продолжить» / «Возобновить» / «Пересоздать» / «Повторить»
+  depending on persisted state. Per-click external-IO is bounded
+  (`poll_window=8s` per resume) so HTTP / proxy timeouts can't strand the
+  flow. Artifacts (skill_id, logo_id, last_known_name) are checkpointed
+  between clicks so partial failures resume from the last completed step.
+
+- **«Переименовать навык в Yandex» action.** New button (visible only when
+  a skill exists and `x_token` is cached) syncs the current `Skill name`
+  to Yandex via `ya_dialogs_api.auto_update_skill(channel="aliceSkill")`.
+  Uses the cached `x_token` — no Device Flow re-prompt. Drift detection:
+  if MA-side `Skill name` differs from `last_known_name` in artifacts,
+  a status hint appears prompting the rename.
+
+- **«Отмена» action.** Visible during pending Device Flow or after FAILED
+  outcomes. Drops in-flight session + resets artifacts; cached `x_token`
+  is preserved so the next create click can skip Passport login.
+
+- **Cached `x_token`.** First successful Device Flow caches the long-lived
+  Yandex Passport `x_token` in encrypted config (`CONF_AUTH_X_TOKEN`,
+  SECURE_STRING) for reuse across rename / re-create within the token's
+  lifetime (months). Cache is dropped silently on any 401 from Yandex /
+  Passport (`InvalidCredentialsError`).
+
+- **Typed-error UX.** `DialogsAuthError` (401 / HTML 403 / 30x) signals
+  `x_token` clear; `DialogsValidationError.fields` populates the status
+  LABEL with per-field hints; `DialogsSkillNotFoundError` flags missing
+  upstream skill so the user can re-create.
+
+### Notes
+
+- The Yandex Dialogs API is **undocumented and private**. If Yandex
+  changes the contract this action will fail; manual setup at
+  https://dialogs.yandex.ru/developer remains the supported fallback.
+
+- After `request_deploy`, Yandex's moderation queue takes ~5–15 minutes
+  for `aliceSkill` skills. The success message links the user to the
+  skill's dev-console page for on-air status.
+
+### Dependencies
+
+- `ya-dialogs-api>=2.0.0` (was indirectly `>=1.0.0`; required for the
+  OAuth-free `aliceSkill` pipeline shape and typed-error hierarchy).
+
 ## [1.0.0] — 2026-05-06
 
 ### Added

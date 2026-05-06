@@ -30,12 +30,19 @@ CONF_DIALOG_SKILL_TOKEN = "dialog_skill_token"
 CONF_DIALOG_WEBHOOK_SECRET = "dialog_webhook_secret"
 CONF_DIALOG_AUTO_CREATE_ARTIFACTS = "dialog_auto_create_artifacts"
 CONF_DIALOG_AUTO_CREATE_SESSION_ID = "dialog_auto_create_session_id"
+# Persisted DeviceCodeSession (JSON) so the auto-create button can advance
+# the Device Flow state machine across multiple clicks. Cleared after a
+# successful poll, on expiry, or on Cancel.
+CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION = "dialog_auto_create_device_session"
 
 # ---------------------------------------------------------------------------
 # Config actions (config-flow buttons)
 # ---------------------------------------------------------------------------
 CONF_ACTION_AUTO_CREATE_DIALOG = "auto_create_dialog_skill"
 CONF_ACTION_RENAME_DIALOG_SKILL = "rename_dialog_skill"
+# Cancel an in-flight Device Flow / drop partial artifacts. Visible only when
+# DEVICE_FLOW_STARTED or FAILED. Cached x_token is preserved across cancel.
+CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW = "cancel_dialog_skill_flow"
 
 # ---------------------------------------------------------------------------
 # Webhook routing

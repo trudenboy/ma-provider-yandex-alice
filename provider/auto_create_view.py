@@ -1,0 +1,169 @@
+# ruff: noqa: RUF001
+"""Pure rendering of auto-create UI entries from state.
+
+Decoupled from the dispatcher (``provider.__init__`` uses these helpers
+verbatim) so the form-shape can be unit-tested without exercising the
+actual orchestrator. Returns ``ConfigEntry`` tuples.
+"""
+
+from __future__ import annotations
+
+from music_assistant_models.config_entries import ConfigEntry
+from music_assistant_models.enums import ConfigEntryType
+from ya_dialogs_api import SkillCreationArtifacts, SkillCreationState
+
+from .auto_create import AutoCreateOutcome, LocalAutoCreateStage
+from .constants import (
+    CONF_ACTION_AUTO_CREATE_DIALOG,
+    CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+)
+
+__all__ = ["build_auto_create_entries"]
+
+
+def _create_button_label(stage: LocalAutoCreateStage) -> str:
+    """Button label flips per stage so users see what the click will do."""
+    return {
+        LocalAutoCreateStage.IDLE: "Создать навык",
+        LocalAutoCreateStage.DEVICE_FLOW_STARTED: "Подтвердить и продолжить",
+        LocalAutoCreateStage.PIPELINE_RUNNING: "Возобновить",
+        LocalAutoCreateStage.DONE: "Пересоздать",
+        LocalAutoCreateStage.FAILED: "Повторить",
+    }[stage]
+
+
+def _derive_stage(
+    *,
+    artifacts: SkillCreationArtifacts,
+    pending_session_present: bool,
+    cached_x_token_present: bool,
+) -> LocalAutoCreateStage:
+    """Derive the UX stage from persistent state.
+
+    Decision order (most specific first):
+
+    1. Pending Device Flow session → ``DEVICE_FLOW_STARTED``.
+    2. Artifacts ``DONE`` → ``DONE`` regardless of token presence.
+    3. Artifacts ``FAILED`` → ``FAILED`` (Retry button).
+    4. Artifacts in any post-create state with cached token → ``PIPELINE_RUNNING``.
+    5. Otherwise → ``IDLE``.
+    """
+    _ = cached_x_token_present  # currently unused but kept for future heuristics
+    if pending_session_present:
+        return LocalAutoCreateStage.DEVICE_FLOW_STARTED
+    if artifacts.state == SkillCreationState.DONE:
+        return LocalAutoCreateStage.DONE
+    if artifacts.state == SkillCreationState.FAILED:
+        return LocalAutoCreateStage.FAILED
+    if artifacts.state in (
+        SkillCreationState.APP_CREATED,
+        SkillCreationState.DRAFT_UPDATED,
+        SkillCreationState.OAUTH_CREATED,
+        SkillCreationState.OAUTH_ATTACHED,
+        SkillCreationState.DEPLOY_REQUESTED,
+    ):
+        return LocalAutoCreateStage.PIPELINE_RUNNING
+    return LocalAutoCreateStage.IDLE
+
+
+def _status_label_text(
+    *,
+    stage: LocalAutoCreateStage,
+    artifacts: SkillCreationArtifacts,
+    action_outcome: AutoCreateOutcome | None,
+) -> str:
+    """Compose the status message shown above the auto-create button.
+
+    Priority: a fresh action outcome wins (the user just clicked); otherwise
+    we fall back to a state-derived static hint so the form still has
+    context after a re-open.
+    """
+    if action_outcome is not None:
+        return action_outcome.user_message
+    if stage == LocalAutoCreateStage.DONE and artifacts.skill_id:
+        return f"✅ Навык создан (skill_id={artifacts.skill_id})."
+    if stage == LocalAutoCreateStage.FAILED and artifacts.last_error:
+        return f"⚠ Ошибка: {artifacts.last_error}"
+    if stage == LocalAutoCreateStage.PIPELINE_RUNNING:
+        return (
+            "⏸ Создание было прервано. Нажмите «Возобновить» чтобы продолжить "
+            f"с шага {artifacts.state.value}."
+        )
+    if stage == LocalAutoCreateStage.IDLE:
+        return (
+            "Нажмите «Создать навык» — Music Assistant войдёт в Яндекс.Паспорт "
+            "(Device Flow) и зарегистрирует навык в dialogs.yandex.ru."
+        )
+    return ""
+
+
+def build_auto_create_entries(
+    *,
+    artifacts: SkillCreationArtifacts,
+    pending_session_present: bool,
+    cached_x_token_present: bool,
+    action_outcome: AutoCreateOutcome | None,
+) -> tuple[ConfigEntry, ...]:
+    """Render the auto-create cluster: status LABEL + ACTION + Cancel.
+
+    The Cancel button is visible only when in DEVICE_FLOW_STARTED or FAILED —
+    these are the states where the user might want to abandon a partial
+    flow without waiting for the underlying user_code to expire.
+    """
+    stage = _derive_stage(
+        artifacts=artifacts,
+        pending_session_present=pending_session_present,
+        cached_x_token_present=cached_x_token_present,
+    )
+
+    status_text = _status_label_text(
+        stage=stage,
+        artifacts=artifacts,
+        action_outcome=action_outcome,
+    )
+
+    entries: list[ConfigEntry] = []
+
+    if status_text:
+        entries.append(
+            ConfigEntry(
+                key="label_auto_create_status",
+                type=ConfigEntryType.LABEL,
+                label=status_text,
+            )
+        )
+
+    entries.append(
+        ConfigEntry(
+            key=CONF_ACTION_AUTO_CREATE_DIALOG,
+            type=ConfigEntryType.ACTION,
+            label="Авто-регистрация навыка",
+            description=(
+                "Один клик создаёт навык в https://dialogs.yandex.ru/developer "
+                "через Яндекс.Паспорт Device Flow. Можно нажимать повторно — "
+                "процесс возобновится с последнего успешного шага."
+            ),
+            action=CONF_ACTION_AUTO_CREATE_DIALOG,
+            action_label=_create_button_label(stage),
+            required=False,
+            default_value="",
+        )
+    )
+
+    if stage in (LocalAutoCreateStage.DEVICE_FLOW_STARTED, LocalAutoCreateStage.FAILED):
+        entries.append(
+            ConfigEntry(
+                key=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+                type=ConfigEntryType.ACTION,
+                label="Отмена",
+                description=(
+                    "Сбрасывает текущий процесс авторизации / создания. Кэш x_token сохраняется."
+                ),
+                action=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+                action_label="Отменить",
+                required=False,
+                default_value="",
+            )
+        )
+
+    return tuple(entries)
