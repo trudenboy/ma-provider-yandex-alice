@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from ya_dialogs_api import (
-    DIALOG_CHANNEL,
     SkillCreationArtifacts,
     SkillCreationState,
     auto_update_skill,
@@ -27,6 +26,7 @@ from ya_dialogs_api import (
 from ya_passport_auth.exceptions import InvalidCredentialsError
 
 from .auth_session import make_cached_authenticator
+from .constants import DIALOG_CHANNEL
 
 _LOGGER = logging.getLogger(__name__)
 

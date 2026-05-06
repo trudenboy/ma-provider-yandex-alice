@@ -44,17 +44,20 @@ def _derive_stage(
     1. Pending Device Flow session → ``DEVICE_FLOW_STARTED``.
     2. Artifacts ``DONE`` → ``DONE`` regardless of token presence.
     3. Artifacts ``FAILED`` → ``FAILED`` (Retry button).
-    4. Artifacts in any post-create state with cached token → ``PIPELINE_RUNNING``.
-    5. Otherwise → ``IDLE``.
+    4. Artifacts in any post-create state with cached token →
+       ``PIPELINE_RUNNING`` ("Resume" — next click hits the pipeline).
+    5. Same intermediate state but **no** cached token → ``IDLE``: next
+       click will start a fresh Device Flow first, so the button label
+       must say "Create skill", not "Resume", to match the actual next step.
+    6. Otherwise → ``IDLE``.
     """
-    _ = cached_x_token_present  # currently unused but kept for future heuristics
     if pending_session_present:
         return LocalAutoCreateStage.DEVICE_FLOW_STARTED
     if artifacts.state == SkillCreationState.DONE:
         return LocalAutoCreateStage.DONE
     if artifacts.state == SkillCreationState.FAILED:
         return LocalAutoCreateStage.FAILED
-    if artifacts.state in (
+    if cached_x_token_present and artifacts.state in (
         SkillCreationState.APP_CREATED,
         SkillCreationState.DRAFT_UPDATED,
         SkillCreationState.OAUTH_CREATED,
@@ -70,15 +73,30 @@ def _status_label_text(
     stage: LocalAutoCreateStage,
     artifacts: SkillCreationArtifacts,
     action_outcome: AutoCreateOutcome | None,
+    pending_user_code: str | None,
+    pending_verification_url: str | None,
 ) -> str:
     """Compose the status message shown above the auto-create button.
 
     Priority: a fresh action outcome wins (the user just clicked); otherwise
     we fall back to a state-derived static hint so the form still has
-    context after a re-open.
+    context after a re-open. ``pending_user_code`` /
+    ``pending_verification_url`` are populated when a Device Flow session is
+    persisted in config — they let us re-show the original code/URL after a
+    form reload, instead of leaving the LABEL blank with no instructions.
     """
     if action_outcome is not None:
         return action_outcome.user_message
+    if stage == LocalAutoCreateStage.DEVICE_FLOW_STARTED:
+        if pending_user_code and pending_verification_url:
+            return (
+                f"Device Flow in progress. Open {pending_verification_url} and "
+                f"enter code {pending_user_code}, then click 'Confirm and continue'."
+            )
+        return (
+            "Device Flow in progress. Click 'Confirm and continue' to check "
+            "for confirmation, or 'Cancel' to abort."
+        )
     if stage == LocalAutoCreateStage.DONE and artifacts.skill_id:
         return f"Skill created (skill_id={artifacts.skill_id})."
     if stage == LocalAutoCreateStage.FAILED and artifacts.last_error:
@@ -102,12 +120,19 @@ def build_auto_create_entries(
     pending_session_present: bool,
     cached_x_token_present: bool,
     action_outcome: AutoCreateOutcome | None,
+    pending_user_code: str | None = None,
+    pending_verification_url: str | None = None,
 ) -> tuple[ConfigEntry, ...]:
     """Render the auto-create cluster: status LABEL + ACTION + Cancel.
 
     The Cancel button is visible only when in DEVICE_FLOW_STARTED or FAILED —
     these are the states where the user might want to abandon a partial
     flow without waiting for the underlying user_code to expire.
+
+    ``pending_user_code`` / ``pending_verification_url`` come from the
+    deserialised Device Flow session: passing them in lets the LABEL
+    remain self-explanatory after a form reload mid-Device-Flow (otherwise
+    the user has nowhere to read the code they need to confirm).
     """
     stage = _derive_stage(
         artifacts=artifacts,
@@ -119,6 +144,8 @@ def build_auto_create_entries(
         stage=stage,
         artifacts=artifacts,
         action_outcome=action_outcome,
+        pending_user_code=pending_user_code,
+        pending_verification_url=pending_verification_url,
     )
 
     entries: list[ConfigEntry] = []

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from typing import cast
+
+from ya_dialogs_api import DIALOG_CHANNEL as _LIB_DIALOG_CHANNEL
+from ya_dialogs_api import Channel
+
+_LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config entry keys (user-facing)
@@ -60,7 +67,18 @@ DIALOG_DEFAULT_NAME = "Music Assistant"
 # Yandex Dialogs app-store-api channel string for the custom dialog skill.
 # Captured from dev console DevTools (POST /apps): channel="aliceSkill".
 # Override via MA_YANDEX_DIALOG_CHANNEL env var if Yandex changes the contract.
-DIALOG_CHANNEL = os.environ.get("MA_YANDEX_DIALOG_CHANNEL", "aliceSkill")
+# Validated against ya_dialogs_api.Channel — invalid values fall back to the
+# library default with a warning rather than producing a silent type lie.
+_dialog_channel_raw = os.environ.get("MA_YANDEX_DIALOG_CHANNEL", _LIB_DIALOG_CHANNEL)
+if _dialog_channel_raw not in ("smartHome", "aliceSkill"):
+    _LOGGER.warning(
+        "MA_YANDEX_DIALOG_CHANNEL=%r is not a recognised Yandex Channel "
+        "wire value; falling back to %r",
+        _dialog_channel_raw,
+        _LIB_DIALOG_CHANNEL,
+    )
+    _dialog_channel_raw = _LIB_DIALOG_CHANNEL
+DIALOG_CHANNEL: Channel = cast("Channel", _dialog_channel_raw)
 DIALOG_NAME_MIN_LEN = 2
 DIALOG_NAME_MAX_LEN = 64
 

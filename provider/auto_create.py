@@ -34,7 +34,6 @@ from enum import StrEnum
 from typing import Any
 
 from ya_dialogs_api import (
-    DIALOG_CHANNEL,
     SkillCreationArtifacts,
     SkillCreationState,
     auto_create_skill,
@@ -46,6 +45,7 @@ from ya_passport_auth.exceptions import (
 )
 
 from .auth_session import make_cached_authenticator, passport_client_session
+from .constants import DIALOG_CHANNEL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -417,14 +417,22 @@ async def _run_pipeline(
 ) -> AutoCreateOutcome:
     """Run the OAuth-free aliceSkill pipeline end-to-end on cached cookies.
 
-    Catches the typed errors the library can surface and converts each into
-    a UX-friendly outcome. Crucially:
+    Error handling has two layers:
 
-    - :class:`DialogsAuthError` (HTTP 401 / HTML 403 / 30x) → clear x_token
-      so the next click triggers a fresh Device Flow.
-    - :class:`DialogsValidationError` → embed per-field map into last_error
-      so the LABEL can show actionable messages.
-    - :class:`DialogsApiError` (catch-all) → just surface the message.
+    1. ``ya_dialogs_api.auto_create_skill`` itself catches every
+       :class:`DialogsApiError` subclass internally and returns artifacts
+       with ``state=FAILED`` and a populated ``last_error`` (see
+       library docstring). We don't need to catch those explicitly — they
+       arrive as a regular return value and flow through
+       :func:`_outcome_from_failed_pipeline`.
+
+    2. :class:`InvalidCredentialsError` from
+       ``ya_passport_auth.refresh_passport_cookies`` is the one exception
+       that escapes the library because cookie refresh happens inside the
+       authenticator context manager (before the library's pipeline
+       starts). We translate it into ``outcome.x_token=""`` so the
+       dispatcher clears the cache and the next click can re-auth
+       cleanly via Device Flow.
     """
     authenticator = make_cached_authenticator(cached_x_token)
 

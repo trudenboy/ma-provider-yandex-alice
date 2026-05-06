@@ -374,3 +374,130 @@ class TestCancelAction:
         assert values[CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION] == ""
         # Token preserved
         assert values[CONF_AUTH_X_TOKEN] == "preserve-me"
+
+
+# ---------------------------------------------------------------------------
+# Code-review fixes — targeted regression coverage
+# ---------------------------------------------------------------------------
+
+
+class TestStableWebhookSecret:
+    """Webhook secret must NOT regenerate between action clicks.
+
+    Otherwise auto-create would register a webhook URL containing a secret
+    that the next render replaces with a different one — orphaning the
+    Yandex-side webhook against MA's eventual saved secret.
+    """
+
+    @pytest.mark.asyncio
+    async def test_secret_reused_across_action_clicks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two consecutive clicks see the same backend_uri/secret (no regen)."""
+        captured_uris: list[str] = []
+
+        async def _capture(**kwargs):
+            captured_uris.append(kwargs["backend_uri"])
+            return AutoCreateOutcome(
+                artifacts=SkillCreationArtifacts(),
+                device_session_blob=None,
+                x_token=None,
+                user_code=None,
+                verification_url=None,
+                user_message="ok",
+                stage=LocalAutoCreateStage.IDLE,
+            )
+
+        monkeypatch.setattr(provider, "run_auto_create_step", _capture)
+
+        # First click: no secret in values → dispatcher generates + writes back.
+        values: dict[str, Any] = {CONF_EXTERNAL_BASE_URL: "https://ma.example.com"}
+        await get_config_entries(
+            _make_mass(),
+            action=CONF_ACTION_AUTO_CREATE_DIALOG,
+            values=values,
+        )
+
+        # The dispatcher must have stabilised the secret in values
+        # so subsequent renders see the same one.
+        first_secret = str(values.get("dialog_webhook_secret") or "")
+        assert first_secret
+
+        # Second click — must reuse the same secret in backend_uri.
+        await get_config_entries(
+            _make_mass(),
+            action=CONF_ACTION_AUTO_CREATE_DIALOG,
+            values=values,
+        )
+
+        assert len(captured_uris) == 2
+        assert captured_uris[0] == captured_uris[1]
+        assert first_secret in captured_uris[0]
+
+
+class TestDeriveStageRespectsCachedToken:
+    """Intermediate artifact state without cached x_token → IDLE, not Resume.
+
+    Otherwise the button label says "Resume" but the next click actually
+    starts a fresh Device Flow — confusing UX.
+    """
+
+    @pytest.mark.asyncio
+    async def test_intermediate_state_without_token_renders_create_label(self) -> None:
+        """artifacts=APP_CREATED + no x_token → auto-create button says 'Create skill'."""
+        artifacts = SkillCreationArtifacts(
+            state=SkillCreationState.APP_CREATED,
+            skill_id="sk-partial",
+        )
+        values = {
+            CONF_DIALOG_AUTO_CREATE_ARTIFACTS: dump_artifacts(artifacts),
+            # No CONF_AUTH_X_TOKEN → next click will hit Device Flow
+        }
+        entries = await get_config_entries(_make_mass(), values=values)
+        keys = _entries_by_key(entries)
+        action_entry = keys[CONF_ACTION_AUTO_CREATE_DIALOG]
+        assert action_entry.action_label == "Create skill"
+
+    @pytest.mark.asyncio
+    async def test_intermediate_state_with_token_renders_resume_label(self) -> None:
+        """artifacts=APP_CREATED + cached x_token → button says 'Resume'."""
+        artifacts = SkillCreationArtifacts(
+            state=SkillCreationState.APP_CREATED,
+            skill_id="sk-partial",
+        )
+        values = {
+            CONF_DIALOG_AUTO_CREATE_ARTIFACTS: dump_artifacts(artifacts),
+            CONF_AUTH_X_TOKEN: "tok",
+        }
+        entries = await get_config_entries(_make_mass(), values=values)
+        keys = _entries_by_key(entries)
+        assert keys[CONF_ACTION_AUTO_CREATE_DIALOG].action_label == "Resume"
+
+
+class TestDeviceFlowStartedHintOnReload:
+    """LABEL re-shows user_code + URL after a form reload mid-Device-Flow."""
+
+    @pytest.mark.asyncio
+    async def test_label_renders_user_code_from_persisted_session(self) -> None:
+        """device_session_blob in values → status LABEL shows the code + URL."""
+        import json
+
+        device_session = json.dumps(
+            {
+                "device_code": "secret",
+                "user_code": "WXYZ-1234",
+                "verification_url": "https://ya.ru/device",
+                "expires_in": 600,
+                "interval": 5,
+                "expires_at_epoch": 9999999999.0,
+            }
+        )
+        values = {CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION: device_session}
+        entries = await get_config_entries(_make_mass(), values=values)
+        keys = _entries_by_key(entries)
+
+        # Status LABEL is rendered with the code + URL inline.
+        assert "label_auto_create_status" in keys
+        status_label = keys["label_auto_create_status"].label
+        assert "WXYZ-1234" in status_label
+        assert "ya.ru/device" in status_label

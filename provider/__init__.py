@@ -33,6 +33,7 @@ from ya_dialogs_api import (
 from .auto_create import (
     AutoCreateOutcome,
     LocalAutoCreateStage,
+    deserialize_device_session,
     run_auto_create_step,
 )
 from .auto_create_view import build_auto_create_entries
@@ -118,6 +119,41 @@ def _name_drifted(artifacts: SkillCreationArtifacts, skill_name: str) -> bool:
     )
 
 
+def _resolve_saved_value(
+    mass: MusicAssistant,
+    instance_id: str | None,
+    values: dict[str, ConfigValueType],
+    key: str,
+) -> str:
+    """Read a config value: form ``values`` first, then persisted provider config.
+
+    Frontend may not echo SECURE_STRING entries back in ``values`` between
+    action clicks. Falling through to ``mass.config.get_provider_config``
+    keeps the source of truth stable for keys the user already saved
+    (cached x_token, generated webhook secret, persisted artifacts blob).
+
+    Returns ``""`` when neither source has a value, the instance_id is
+    missing, or the MA config API raises (e.g. on a fresh provider
+    instance that has not been saved yet).
+    """
+    fresh = values.get(key)
+    if fresh:
+        return str(fresh)
+    if not instance_id:
+        return ""
+    try:
+        cfg = mass.config.get_provider_config(instance_id)
+    except Exception:
+        return ""
+    if cfg is None:
+        return ""
+    try:
+        saved = cfg.get_value(key)
+    except Exception:
+        return ""
+    return str(saved or "")
+
+
 async def get_config_entries(  # noqa: PLR0915
     mass: MusicAssistant,
     instance_id: str | None = None,
@@ -141,19 +177,31 @@ async def get_config_entries(  # noqa: PLR0915
     ``CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION``) that round-trip through the
     form on every save.
     """
-    _ = instance_id
     values = values or {}
 
     # Generate a webhook secret on first open if the user hasn't set one yet.
-    existing_secret = str(values.get(CONF_DIALOG_WEBHOOK_SECRET) or "").strip()
+    # Read through saved provider config too: the frontend may not echo
+    # SECURE_STRING fields between action clicks, and regenerating the
+    # secret per call would orphan webhooks already registered with Yandex
+    # against an earlier (now-discarded) secret.
+    existing_secret = _resolve_saved_value(
+        mass, instance_id, values, CONF_DIALOG_WEBHOOK_SECRET
+    ).strip()
     default_secret = existing_secret or _generate_webhook_secret()
+    # Stabilise inside this dispatch: any backend_uri assembled below uses
+    # the same secret as the form will save on user click.
+    values[CONF_DIALOG_WEBHOOK_SECRET] = default_secret
 
     instance_name = str(values.get(CONF_INSTANCE_NAME) or DIALOG_DEFAULT_NAME)
 
-    # ---- Pull persistent auto-create / auth state from values ----
-    artifacts = load_artifacts(str(values.get(CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or "") or None)
-    cached_x_token = str(values.get(CONF_AUTH_X_TOKEN) or "")
-    device_session_blob = str(values.get(CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION) or "")
+    # ---- Pull persistent auto-create / auth state ----
+    artifacts = load_artifacts(
+        _resolve_saved_value(mass, instance_id, values, CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or None
+    )
+    cached_x_token = _resolve_saved_value(mass, instance_id, values, CONF_AUTH_X_TOKEN)
+    device_session_blob = _resolve_saved_value(
+        mass, instance_id, values, CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION
+    )
 
     # Skill name priority: explicit dialog skill name → instance name → default.
     skill_name = (
@@ -163,7 +211,7 @@ async def get_config_entries(  # noqa: PLR0915
     )
 
     external_base_url = str(values.get(CONF_EXTERNAL_BASE_URL) or "").strip().rstrip("/")
-    webhook_secret = str(values.get(CONF_DIALOG_WEBHOOK_SECRET) or "").strip() or default_secret
+    webhook_secret = default_secret
 
     action_outcome: AutoCreateOutcome | None = None
     update_message: str | None = None
@@ -278,11 +326,23 @@ async def get_config_entries(  # noqa: PLR0915
     )
 
     # ---- Auto-create cluster: status LABEL + auto-create ACTION + Cancel ----
+    # Surface the pending session details so the LABEL can re-show the
+    # user_code + verification URL after a form reload mid-Device-Flow.
+    pending_user_code: str | None = None
+    pending_verification_url: str | None = None
+    if device_session_blob:
+        decoded = deserialize_device_session(device_session_blob)
+        if decoded is not None:
+            pending_user_code = decoded[0].user_code
+            pending_verification_url = decoded[0].verification_url
+
     auto_create_entries = build_auto_create_entries(
         artifacts=artifacts,
         pending_session_present=bool(device_session_blob),
         cached_x_token_present=bool(cached_x_token),
         action_outcome=action_outcome,
+        pending_user_code=pending_user_code,
+        pending_verification_url=pending_verification_url,
     )
 
     # ---- Rename cluster: drift LABEL (conditional) + Rename ACTION ----
