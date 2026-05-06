@@ -119,7 +119,7 @@ def _name_drifted(artifacts: SkillCreationArtifacts, skill_name: str) -> bool:
     )
 
 
-def _resolve_saved_value(
+async def _resolve_saved_value(
     mass: MusicAssistant,
     instance_id: str | None,
     values: dict[str, ConfigValueType],
@@ -132,9 +132,10 @@ def _resolve_saved_value(
     keeps the source of truth stable for keys the user already saved
     (cached x_token, generated webhook secret, persisted artifacts blob).
 
-    Returns ``""`` when neither source has a value, the instance_id is
-    missing, or the MA config API raises (e.g. on a fresh provider
-    instance that has not been saved yet).
+    ``mass.config.get_provider_config`` is async in current MA, so this
+    helper is async too. Returns ``""`` when neither source has a value,
+    the instance_id is missing, or the MA config API raises (e.g. on a
+    fresh provider instance that has not been saved yet).
     """
     fresh = values.get(key)
     if fresh:
@@ -142,7 +143,7 @@ def _resolve_saved_value(
     if not instance_id:
         return ""
     try:
-        cfg = mass.config.get_provider_config(instance_id)
+        cfg = await mass.config.get_provider_config(instance_id)
     except Exception:
         return ""
     if cfg is None:
@@ -184,8 +185,8 @@ async def get_config_entries(  # noqa: PLR0915
     # SECURE_STRING fields between action clicks, and regenerating the
     # secret per call would orphan webhooks already registered with Yandex
     # against an earlier (now-discarded) secret.
-    existing_secret = _resolve_saved_value(
-        mass, instance_id, values, CONF_DIALOG_WEBHOOK_SECRET
+    existing_secret = (
+        await _resolve_saved_value(mass, instance_id, values, CONF_DIALOG_WEBHOOK_SECRET)
     ).strip()
     default_secret = existing_secret or _generate_webhook_secret()
     # Stabilise inside this dispatch: any backend_uri assembled below uses
@@ -196,10 +197,11 @@ async def get_config_entries(  # noqa: PLR0915
 
     # ---- Pull persistent auto-create / auth state ----
     artifacts = load_artifacts(
-        _resolve_saved_value(mass, instance_id, values, CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or None
+        (await _resolve_saved_value(mass, instance_id, values, CONF_DIALOG_AUTO_CREATE_ARTIFACTS))
+        or None
     )
-    cached_x_token = _resolve_saved_value(mass, instance_id, values, CONF_AUTH_X_TOKEN)
-    device_session_blob = _resolve_saved_value(
+    cached_x_token = await _resolve_saved_value(mass, instance_id, values, CONF_AUTH_X_TOKEN)
+    device_session_blob = await _resolve_saved_value(
         mass, instance_id, values, CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION
     )
 
