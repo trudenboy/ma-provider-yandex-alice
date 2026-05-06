@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-05-06
+
+### Fixed
+
+- **Critical: provider settings page froze and triggered an infinite
+  `--- Logging error ---` storm in MA's stdout** when the user opened the
+  Yandex Alice config form (~93 markers/sec; in dev container a 7,000-line
+  spam blew up before the user could close the dialog).
+
+  Root cause: the `_resolve_saved_value` helper introduced in v1.1.0 (as a
+  code-review fix for SECURE_STRING fields the frontend doesn't echo back)
+  called `await mass.config.get_provider_config(instance_id)` inside
+  `get_config_entries`. MA invokes `get_config_entries` *while* it holds
+  the config-controller lock, so our recursive read deadlocked against
+  the same lock. The deadlocked task starved the queue-listener thread,
+  which started swallowing log records and emitting handler-error markers
+  in a tight loop.
+
+  Fix: drop the `mass.config` fallback. `_resolve_saved_value` now reads
+  only from the form `values` dict (which the frontend always populates
+  for non-secret keys, and which our dispatcher writes secrets back into
+  early in the call so subsequent action clicks within the same session
+  see stable values). Helper is sync again; its three callers no longer
+  need `await`.
+
+  Webhook-secret stability across action clicks (the original concern of
+  the v1.1.0 code-review thread) is preserved — the secret is generated
+  once in the dispatcher and immediately written back into `values`, so
+  any `backend_uri` assembled below uses the same value as the form will
+  save on Save.
+
+  Verified locally in a Music Assistant dev container: the form opens
+  instantly, no log-error spam, no log-file stall.
+
 ## [1.1.1] — 2026-05-06
 
 ### Changed
