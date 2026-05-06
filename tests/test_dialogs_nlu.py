@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from provider.dialogs_nlu import (
+from music_assistant.providers.yandex_alice.dialogs_nlu import (
     ParsedCommand,
     parse_command,
     resolve_player,

@@ -14,7 +14,11 @@ import pytest
 from aiohttp.test_utils import make_mocked_request
 from music_assistant_models.enums import QueueOption, RepeatMode
 
-from provider.dialogs import _STATE_CACHE_TTL_SEC, DialogsWebhookHandler, _tts_for
+from music_assistant.providers.yandex_alice.dialogs import (
+    _STATE_CACHE_TTL_SEC,
+    DialogsWebhookHandler,
+    _tts_for,
+)
 
 if TYPE_CHECKING:
     from aiohttp import web

@@ -25,8 +25,8 @@ from ya_passport_auth.exceptions import (
     InvalidCredentialsError,
 )
 
-from provider import auto_create
-from provider.auto_create import (
+from music_assistant.providers.yandex_alice import auto_create
+from music_assistant.providers.yandex_alice.auto_create import (
     LocalAutoCreateStage,
     deserialize_device_session,
     run_auto_create_step,

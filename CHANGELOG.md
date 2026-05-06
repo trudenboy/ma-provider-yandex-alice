@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-05-06
+
+### Changed
+
+- **Tests now use the upstream import path.** All `from provider import ...`
+  / `import provider` switched to `music_assistant.providers.yandex_alice.*`
+  (with constants pulled from the `.constants` sub-module rather than
+  re-exported via `__init__.py`). Matches the convention sibling provider
+  test suites use in `music-assistant/server`. `conftest.py`'s alias-magic
+  registers both names, so the source-repo test run keeps working.
+- **Strict mypy compliance in tests** — added missing return-type and
+  parameter annotations on inner async helpers (`_capture(**kwargs: Any) ->
+  AutoCreateOutcome`, `_fake_refresh(self: Any, x_token: SecretStr) ->
+  None`, `_FakePassportClient.__init__/close` typed). Guarded `await_args`
+  with explicit `is not None` asserts before `.kwargs` access.
+- **Form `values` dicts are typed `dict[str, Any]`** in tests — previously
+  inferred as `dict[str, str]`, which mypy strict (in upstream MA) rejects
+  against `get_config_entries`'s `dict[str, ConfigValueType] | None`
+  signature.
+
+### Fixed
+
+- Upstream `music-assistant/server` CI (Lint & Type Check + Pytest) — the
+  test suite now passes both jobs out of the box. No provider-runtime
+  changes; this release is test-and-tooling only.
+
 ## [1.1.0] — 2026-05-06
 
 ### Added

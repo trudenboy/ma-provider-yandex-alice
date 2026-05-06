@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from provider.dialogs_nlu import ParsedCommand
-from provider.dialogs_player import play_for_alice, resolve_query
+from music_assistant.providers.yandex_alice.dialogs_nlu import ParsedCommand
+from music_assistant.providers.yandex_alice.dialogs_player import play_for_alice, resolve_query
 
 # ---------------------------------------------------------------------------
 # resolve_query

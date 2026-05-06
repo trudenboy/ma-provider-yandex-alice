@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from music_assistant_models.enums import RepeatMode
 
-from provider.dialogs_control import (
+from music_assistant.providers.yandex_alice.dialogs_control import (
     ParsedControl,
     _plural_ru,
     control_confirmation,

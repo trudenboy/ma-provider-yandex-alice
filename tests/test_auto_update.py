@@ -13,8 +13,8 @@ import pytest
 from ya_dialogs_api import SkillCreationArtifacts, SkillCreationState
 from ya_passport_auth.exceptions import InvalidCredentialsError
 
-from provider import auto_update
-from provider.auto_update import run_auto_update
+from music_assistant.providers.yandex_alice import auto_update
+from music_assistant.providers.yandex_alice.auto_update import run_auto_update
 
 
 def _patch_auto_update_skill(
@@ -127,6 +127,7 @@ class TestRunAutoUpdateHappyPath:
             artifacts=SkillCreationArtifacts(state=SkillCreationState.DONE, skill_id="sk-1"),
         )
 
+        assert skill_mock.await_args is not None
         kwargs = skill_mock.await_args.kwargs
         assert kwargs["channel"] == "aliceSkill"
         assert kwargs["skill_name"] == "My Skill"

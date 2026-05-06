@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from provider.dialog_skill_meta import (
+from music_assistant.providers.yandex_alice.dialog_skill_meta import (
     build_activation_phrases,
     build_backend_uri,
     build_skill_description,
