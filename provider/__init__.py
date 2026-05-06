@@ -74,7 +74,7 @@ async def _list_player_options(mass: MusicAssistant) -> list[ConfigValueOption]:
     """List MA players the user can expose to voice control."""
     options: list[ConfigValueOption] = []
     try:
-        for player in mass.players.all(return_unavailable=False):
+        for player in mass.players.all_players():
             options.append(
                 ConfigValueOption(
                     title=player.display_name or player.name or player.player_id,

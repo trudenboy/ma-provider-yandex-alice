@@ -41,10 +41,11 @@ class YandexAlicePlugin(PluginProvider):
         self._dialog_skill_enabled = bool(self.config.get_value(CONF_DIALOG_SKILL_ENABLED))
         self._dialog_skill_id = str(self.config.get_value(CONF_DIALOG_SKILL_ID) or "")
         self._dialog_webhook_secret = str(self.config.get_value(CONF_DIALOG_WEBHOOK_SECRET) or "")
-        exposed = self.config.get_value(CONF_EXPOSED_PLAYERS)
-        self._exposed_player_ids: set[str] | None = (
-            set(exposed) if isinstance(exposed, list) and exposed else None
-        )
+        exposed_raw = self.config.get_value(CONF_EXPOSED_PLAYERS)
+        if isinstance(exposed_raw, list) and exposed_raw:
+            self._exposed_player_ids: set[str] | None = {str(item) for item in exposed_raw}
+        else:
+            self._exposed_player_ids = None
 
     async def loaded_in_mass(self) -> None:
         """Register the Dialogs webhook route once the webserver is up."""
