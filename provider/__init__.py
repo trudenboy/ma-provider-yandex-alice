@@ -146,8 +146,6 @@ async def _resolve_saved_value(
         cfg = await mass.config.get_provider_config(instance_id)
     except Exception:
         return ""
-    if cfg is None:
-        return ""
     try:
         saved = cfg.get_value(key)
     except Exception:
