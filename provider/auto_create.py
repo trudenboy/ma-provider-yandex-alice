@@ -1,10 +1,9 @@
-# ruff: noqa: RUF001, RUF002
 """Self-resuming Device Flow + dialog-skill creation orchestrator.
 
 Music Assistant config-actions are synchronous: each click of the auto-create
 button is one HTTP request, and the form re-renders with whatever entries we
 return. Yandex Passport's Device Flow needs the user to walk away and confirm
-on a different page (~30s–several minutes), so we can't drive it inside a
+on a different page (~30s-several minutes), so we can't drive it inside a
 single action call.
 
 Solution: layer a *local* state machine on top of ``SkillCreationArtifacts``
@@ -64,8 +63,8 @@ class LocalAutoCreateStage(StrEnum):
 
     Not persisted directly: rendered on every click from
     ``(SkillCreationArtifacts, has_pending_device_session, has_cached_x_token)``.
-    Drives the button label flip ("Создать" / "Подтвердить и продолжить" /
-    "Возобновить" / "Пересоздать" / "Повторить") and the visibility of the
+    Drives the button label flip ("Create" / "Confirm and continue" /
+    "Resume" / "Re-create" / "Retry") and the visibility of the
     Cancel button.
     """
 
@@ -209,7 +208,7 @@ async def run_auto_create_step(
             x_token=None,
             user_code=None,
             verification_url=None,
-            user_message="Навык создан. Нажмите «Сохранить» чтобы применить настройки.",
+            user_message="Skill created. Click 'Save' to apply the settings.",
             stage=LocalAutoCreateStage.DONE,
         )
 
@@ -259,7 +258,7 @@ async def _start_device_flow(*, artifacts: SkillCreationArtifacts) -> AutoCreate
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error=f"Не удалось запросить код у Яндекс.Паспорта: {exc!r}",
+            last_error=f"Failed to request a device code from Yandex Passport: {exc!r}",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -274,8 +273,8 @@ async def _start_device_flow(*, artifacts: SkillCreationArtifacts) -> AutoCreate
     expires_at = time.time() + session.expires_in
     blob = serialize_device_session(session, expires_at)
     user_message = (
-        f"Откройте {session.verification_url} и введите код {session.user_code}. "
-        "После подтверждения нажмите кнопку ещё раз."
+        f"Open {session.verification_url} and enter code {session.user_code}. "
+        "Click the button again once you've confirmed."
     )
     return AutoCreateOutcome(
         artifacts=artifacts,
@@ -306,7 +305,7 @@ async def _resume_device_flow(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error="Срок действия кода истёк. Нажмите «Создать» чтобы получить новый.",
+            last_error="Device code expired. Click 'Create' to request a new one.",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -337,15 +336,15 @@ async def _resume_device_flow(
                 user_code=pending_session.user_code,
                 verification_url=pending_session.verification_url,
                 user_message=(
-                    f"Ещё ждём подтверждения. Код {pending_session.user_code} "
-                    f"на {pending_session.verification_url}. Нажмите кнопку ещё раз."
+                    f"Still waiting for confirmation. Code {pending_session.user_code} "
+                    f"at {pending_session.verification_url}. Click the button again."
                 ),
                 stage=LocalAutoCreateStage.DEVICE_FLOW_STARTED,
             )
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error="Срок действия кода истёк. Нажмите «Создать» чтобы получить новый.",
+            last_error="Device code expired. Click 'Create' to request a new one.",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -361,7 +360,7 @@ async def _resume_device_flow(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error=f"Яндекс.Паспорт отклонил вход: {exc}",
+            last_error=f"Yandex Passport rejected the sign-in: {exc}",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -377,7 +376,7 @@ async def _resume_device_flow(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error=f"Неожиданная ошибка авторизации: {exc!r}",
+            last_error=f"Unexpected authentication error: {exc!r}",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -445,7 +444,7 @@ async def _run_pipeline(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error="Кэш авторизации истёк. Нажмите кнопку ещё раз для повторной авторизации.",
+            last_error="Cached auth has expired. Click the button again to re-authenticate.",
         )
         return AutoCreateOutcome(
             artifacts=failed,
@@ -464,9 +463,9 @@ async def _run_pipeline(
             else "https://dialogs.yandex.ru/developer"
         )
         message = (
-            f"✅ Навык создан (skill_id={result.skill_id}). "
-            f"⏳ Модерация Yandex: 5–15 минут. "
-            f"Проверьте on-air статус: {skill_url}"
+            f"Skill created (skill_id={result.skill_id}). "
+            f"Yandex moderation queue: 5-15 minutes. "
+            f"Check on-air status: {skill_url}"
         )
         return AutoCreateOutcome(
             artifacts=result,
@@ -490,7 +489,7 @@ def _outcome_from_failed_pipeline(result: SkillCreationArtifacts) -> AutoCreateO
     (dispatcher) layers domain-aware advice (e.g. duplicate-name → suggest
     rename) by inspecting the message before rendering.
     """
-    msg = result.last_error or "Пайплайн завершился с ошибкой без описания."
+    msg = result.last_error or "Pipeline failed without a description."
     return AutoCreateOutcome(
         artifacts=result,
         device_session_blob=None,

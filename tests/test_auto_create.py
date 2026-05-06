@@ -315,7 +315,7 @@ class TestResumeDeviceFlow:
 
         assert outcome.stage == LocalAutoCreateStage.FAILED
         assert outcome.device_session_blob is None
-        assert "истёк" in (outcome.user_message or "")
+        assert "expired" in (outcome.user_message or "")
 
     @pytest.mark.asyncio
     async def test_invalid_credentials_returns_failed(
@@ -342,9 +342,8 @@ class TestResumeDeviceFlow:
 
         assert outcome.stage == LocalAutoCreateStage.FAILED
         assert outcome.device_session_blob is None
-        assert "отклонил" in (outcome.user_message or "") or "cancelled" in (
-            outcome.user_message or ""
-        )
+        msg = (outcome.user_message or "").lower()
+        assert "rejected" in msg or "cancelled" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +386,7 @@ class TestRunPipeline:
         """auto_create_skill returns FAILED → outcome stage=FAILED, last_error rendered."""
         failed = SkillCreationArtifacts(
             state=SkillCreationState.FAILED,
-            last_error="Имя занято — выберите другое",
+            last_error="Skill name is already taken — pick another",
         )
         _patch_auto_create_skill(monkeypatch, return_artifacts=failed)
 
@@ -403,7 +402,7 @@ class TestRunPipeline:
         )
 
         assert outcome.stage == LocalAutoCreateStage.FAILED
-        assert "занято" in outcome.user_message
+        assert "already taken" in outcome.user_message
 
     @pytest.mark.asyncio
     async def test_passport_invalid_credentials_clears_token(
@@ -429,7 +428,7 @@ class TestRunPipeline:
 
         assert outcome.stage == LocalAutoCreateStage.FAILED
         assert outcome.x_token == ""  # Signal to dispatcher: clear the cache
-        assert "истёк" in (outcome.user_message or "")
+        assert "expired" in (outcome.user_message or "")
 
 
 # ---------------------------------------------------------------------------

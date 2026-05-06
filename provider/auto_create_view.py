@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001
 """Pure rendering of auto-create UI entries from state.
 
 Decoupled from the dispatcher (``provider.__init__`` uses these helpers
@@ -24,11 +23,11 @@ __all__ = ["build_auto_create_entries"]
 def _create_button_label(stage: LocalAutoCreateStage) -> str:
     """Button label flips per stage so users see what the click will do."""
     return {
-        LocalAutoCreateStage.IDLE: "Создать навык",
-        LocalAutoCreateStage.DEVICE_FLOW_STARTED: "Подтвердить и продолжить",
-        LocalAutoCreateStage.PIPELINE_RUNNING: "Возобновить",
-        LocalAutoCreateStage.DONE: "Пересоздать",
-        LocalAutoCreateStage.FAILED: "Повторить",
+        LocalAutoCreateStage.IDLE: "Create skill",
+        LocalAutoCreateStage.DEVICE_FLOW_STARTED: "Confirm and continue",
+        LocalAutoCreateStage.PIPELINE_RUNNING: "Resume",
+        LocalAutoCreateStage.DONE: "Re-create",
+        LocalAutoCreateStage.FAILED: "Retry",
     }[stage]
 
 
@@ -81,18 +80,18 @@ def _status_label_text(
     if action_outcome is not None:
         return action_outcome.user_message
     if stage == LocalAutoCreateStage.DONE and artifacts.skill_id:
-        return f"✅ Навык создан (skill_id={artifacts.skill_id})."
+        return f"Skill created (skill_id={artifacts.skill_id})."
     if stage == LocalAutoCreateStage.FAILED and artifacts.last_error:
-        return f"⚠ Ошибка: {artifacts.last_error}"
+        return f"Error: {artifacts.last_error}"
     if stage == LocalAutoCreateStage.PIPELINE_RUNNING:
         return (
-            "⏸ Создание было прервано. Нажмите «Возобновить» чтобы продолжить "
-            f"с шага {artifacts.state.value}."
+            "Skill creation was interrupted. Click 'Resume' to continue "
+            f"from step {artifacts.state.value}."
         )
     if stage == LocalAutoCreateStage.IDLE:
         return (
-            "Нажмите «Создать навык» — Music Assistant войдёт в Яндекс.Паспорт "
-            "(Device Flow) и зарегистрирует навык в dialogs.yandex.ru."
+            "Click 'Create skill' — Music Assistant will sign in to Yandex Passport "
+            "(Device Flow) and register the skill at dialogs.yandex.ru."
         )
     return ""
 
@@ -137,11 +136,11 @@ def build_auto_create_entries(
         ConfigEntry(
             key=CONF_ACTION_AUTO_CREATE_DIALOG,
             type=ConfigEntryType.ACTION,
-            label="Авто-регистрация навыка",
+            label="Auto-register skill",
             description=(
-                "Один клик создаёт навык в https://dialogs.yandex.ru/developer "
-                "через Яндекс.Паспорт Device Flow. Можно нажимать повторно — "
-                "процесс возобновится с последнего успешного шага."
+                "One click creates a skill at https://dialogs.yandex.ru/developer "
+                "via the Yandex Passport Device Flow. The button can be clicked "
+                "repeatedly — the process resumes from the last completed step."
             ),
             action=CONF_ACTION_AUTO_CREATE_DIALOG,
             action_label=_create_button_label(stage),
@@ -155,12 +154,13 @@ def build_auto_create_entries(
             ConfigEntry(
                 key=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
                 type=ConfigEntryType.ACTION,
-                label="Отмена",
+                label="Cancel",
                 description=(
-                    "Сбрасывает текущий процесс авторизации / создания. Кэш x_token сохраняется."
+                    "Aborts the current authentication / creation process. "
+                    "The cached x_token is preserved."
                 ),
                 action=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
-                action_label="Отменить",
+                action_label="Cancel",
                 required=False,
                 default_value="",
             )

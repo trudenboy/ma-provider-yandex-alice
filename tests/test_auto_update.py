@@ -46,7 +46,7 @@ class TestRunAutoUpdatePreconditions:
         )
         assert result.artifacts.state == SkillCreationState.FAILED
         assert result.x_token is None
-        assert "Нет кэша авторизации" in result.user_message
+        assert "No cached authentication" in result.user_message
 
     @pytest.mark.asyncio
     async def test_empty_cached_x_token_returns_failed(self) -> None:
@@ -61,7 +61,7 @@ class TestRunAutoUpdatePreconditions:
             artifacts=SkillCreationArtifacts(skill_id="sk-1"),
         )
         assert result.artifacts.state == SkillCreationState.FAILED
-        assert "Нет кэша" in result.user_message
+        assert "No cached" in result.user_message
 
     @pytest.mark.asyncio
     async def test_no_skill_id_returns_failed(self) -> None:
@@ -84,7 +84,7 @@ class TestRunAutoUpdateHappyPath:
 
     @pytest.mark.asyncio
     async def test_returns_done_with_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DONE outcome surfaces a Russian-language confirmation message."""
+        """DONE outcome surfaces a confirmation message."""
         done = SkillCreationArtifacts(
             state=SkillCreationState.DONE,
             skill_id="sk-1",
@@ -105,7 +105,7 @@ class TestRunAutoUpdateHappyPath:
 
         assert result.artifacts.state == SkillCreationState.DONE
         assert result.artifacts.last_known_name == "New Name"
-        assert "обновлён" in result.user_message
+        assert "updated" in result.user_message
         assert "New Name" in result.user_message
         skill_mock.assert_awaited_once()
 
@@ -185,4 +185,4 @@ class TestRunAutoUpdateFailures:
 
         assert result.artifacts.state == SkillCreationState.FAILED
         assert result.x_token == ""  # Signal to dispatcher: clear cache
-        assert "истёк" in result.user_message
+        assert "expired" in result.user_message

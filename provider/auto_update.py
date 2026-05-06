@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001
 """Auto-update wrapper around ``ya_dialogs_api.auto_update_skill``.
 
 Used for both rename and drift-sync clicks. ``auto_update_skill`` patches
@@ -76,8 +75,8 @@ async def run_auto_update(
             artifacts,
             state=SkillCreationState.FAILED,
             last_error=(
-                "Нет кэша авторизации — сначала выполните «Создать навык» "
-                "для входа в Яндекс.Паспорт."
+                "No cached authentication — run 'Create skill' first "
+                "to sign in via Yandex Passport."
             ),
         )
         return AutoUpdateOutcome(
@@ -90,7 +89,7 @@ async def run_auto_update(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error="skill_id отсутствует — сначала создайте навык кнопкой «Создать».",
+            last_error="skill_id is missing — create the skill first via the 'Create' button.",
         )
         return AutoUpdateOutcome(
             artifacts=failed,
@@ -116,9 +115,7 @@ async def run_auto_update(
         failed = dataclasses.replace(
             artifacts,
             state=SkillCreationState.FAILED,
-            last_error=(
-                "Кэш авторизации истёк. Запустите «Создать навык» для повторной авторизации."
-            ),
+            last_error=("Cached auth has expired. Run 'Create skill' to re-authenticate."),
         )
         return AutoUpdateOutcome(
             artifacts=failed,
@@ -128,8 +125,8 @@ async def run_auto_update(
 
     if result.state == SkillCreationState.DONE:
         message = (
-            f"✅ Навык обновлён (имя: {skill_name!r}). "
-            "⏳ Модерация Yandex: 5–15 минут до публикации обновления."
+            f"Skill updated (name: {skill_name!r}). "
+            "Yandex moderation queue: 5-15 minutes before the update is published."
         )
         return AutoUpdateOutcome(
             artifacts=result,
@@ -137,7 +134,7 @@ async def run_auto_update(
             user_message=message,
         )
 
-    msg = result.last_error or "Не удалось обновить навык."
+    msg = result.last_error or "Failed to update the skill."
     return AutoUpdateOutcome(
         artifacts=result,
         x_token=None,

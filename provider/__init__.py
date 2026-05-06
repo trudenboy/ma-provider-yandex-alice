@@ -5,7 +5,7 @@ NLU voice control surface invoked via *«Алиса, попроси Music Assist
 
 Setup paths:
 
-1. **Auto** (since v1.1.0): the *«Создать навык»* button kicks off a Yandex
+1. **Auto** (since v1.1.0): the *Create skill* button kicks off a Yandex
    Passport Device Flow login and registers the skill in
    ``https://dialogs.yandex.ru/developer`` programmatically via
    ``ya-dialogs-api``. The skill ID is auto-populated on success.
@@ -294,8 +294,8 @@ async def get_config_entries(  # noqa: PLR0915
             drift_text = update_message
         elif _name_drifted(artifacts, skill_name):
             drift_text = (
-                f"⚠ Имя в Yandex (`{artifacts.last_known_name}`) отличается "
-                f"от текущего «{skill_name}». Нажмите «Переименовать»."
+                f"Name in Yandex ('{artifacts.last_known_name}') differs from "
+                f"the current 'Skill name' ({skill_name!r}). Click 'Rename'."
             )
         rename_entries = (
             *(
@@ -312,14 +312,14 @@ async def get_config_entries(  # noqa: PLR0915
             ConfigEntry(
                 key=CONF_ACTION_RENAME_DIALOG_SKILL,
                 type=ConfigEntryType.ACTION,
-                label="Переименовать навык в Yandex",
+                label="Rename skill in Yandex",
                 description=(
-                    "Применить текущее значение «Skill name» к существующему "
-                    "навыку в Yandex Dialogs (PATCH draft + re-deploy). "
-                    "Использует кэш x_token, без повторной авторизации."
+                    "Apply the current 'Skill name' value to the existing "
+                    "skill in Yandex Dialogs (PATCH draft + re-deploy). "
+                    "Uses the cached x_token — no re-authentication required."
                 ),
                 action=CONF_ACTION_RENAME_DIALOG_SKILL,
-                action_label="Переименовать",
+                action_label="Rename",
                 required=False,
                 default_value="",
             ),
@@ -361,7 +361,7 @@ async def get_config_entries(  # noqa: PLR0915
             key="label_intro",
             type=ConfigEntryType.LABEL,
             label=(
-                "🎙️ Yandex Alice voice control. Use «Создать навык» below "
+                "Yandex Alice voice control. Use 'Create skill' below "
                 "for one-click registration via Yandex Passport, or set up "
                 f"manually at {YANDEX_DIALOGS_DEVELOPER_URL}."
             ),
@@ -373,7 +373,7 @@ async def get_config_entries(  # noqa: PLR0915
             description=(
                 "Display name shown to users. Pick something they will say "
                 'to invoke the skill, e.g. "Music Assistant" → '
-                "«Алиса, попроси Music Assistant …»"
+                '"Alice, ask Music Assistant ..."'
             ),
             required=False,
             default_value=DIALOG_DEFAULT_NAME,
