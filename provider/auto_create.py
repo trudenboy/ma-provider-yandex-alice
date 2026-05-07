@@ -34,7 +34,7 @@ import contextlib
 import dataclasses
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -176,7 +176,7 @@ def _make_logging_creator_factory() -> Callable[[aiohttp.ClientSession], Dialogs
         original_update_draft = creator.update_draft
 
         async def _logged_update_draft(
-            csrf: str, skill_id: str, payload: dict[str, Any]
+            csrf: str, skill_id: str, payload: Mapping[str, Any]
         ) -> None:
             _LOGGER.debug(
                 "update_draft payload: %s",
