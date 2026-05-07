@@ -383,8 +383,7 @@ async def perform_device_auth(
             try:
                 async with AuthenticationHelper(mass, session_id) as auth_helper:
                     auth_helper.send_url(
-                        page_url
-                        or f"{session.verification_url}?user_code={session.user_code}"
+                        page_url or f"{session.verification_url}?user_code={session.user_code}"
                     )
                     try:
                         creds = await client.poll_device_until_confirmed(session)
@@ -412,8 +411,6 @@ async def perform_device_auth(
             return x_token, display_login
 
     except DeviceCodeTimeoutError as err:
-        raise LoginFailed(
-            "Device authentication timed out — please try again."
-        ) from err
+        raise LoginFailed("Device authentication timed out — please try again.") from err
     except YaPassportError as err:
         raise LoginFailed(f"Yandex Passport error: {err}") from err

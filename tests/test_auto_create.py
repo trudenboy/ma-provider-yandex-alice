@@ -72,7 +72,9 @@ def _patch_creator(
     if delete_skill is not None:
         creator.delete_skill = delete_skill
     monkeypatch.setattr(
-        auto_create, "DialogsSkillCreator", lambda *a, **kw: creator  # noqa: ARG005
+        auto_create,
+        "DialogsSkillCreator",
+        lambda *a, **kw: creator,  # noqa: ARG005
     )
     return creator
 
@@ -165,9 +167,7 @@ class TestRunCreateSkill:
         assert outcome.artifacts.skill_id == "sk-new"
 
     @pytest.mark.asyncio
-    async def test_duplicate_detected_short_circuits(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_duplicate_detected_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_cached_session(monkeypatch, MagicMock())
         _patch_creator(
             monkeypatch,
@@ -313,9 +313,7 @@ class TestDeleteThenRecreate:
         delete_mock.assert_awaited_once_with("csrf-tok", "sk-old")
 
     @pytest.mark.asyncio
-    async def test_delete_failure_short_circuits(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_delete_failure_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_cached_session(monkeypatch, MagicMock())
         delete_mock = AsyncMock(side_effect=RuntimeError("boom"))
         _patch_creator(monkeypatch, delete_skill=delete_mock)

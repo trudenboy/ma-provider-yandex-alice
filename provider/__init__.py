@@ -338,9 +338,7 @@ async def get_config_entries(  # noqa: PLR0915
         _resolve_saved_value(values, CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or None
     )
     cached_x_token = _resolve_secure_string_from(saved_provider, values, CONF_AUTH_X_TOKEN)
-    skill_token_value = _resolve_secure_string_from(
-        saved_provider, values, CONF_DIALOG_SKILL_TOKEN
-    )
+    skill_token_value = _resolve_secure_string_from(saved_provider, values, CONF_DIALOG_SKILL_TOKEN)
     # Carried across renders unless a deploy-related action below
     # overrides it via a snapshot fetch (or DELETE_SKILL clears it).
     publication_status = _resolve_saved_value(values, CONF_DIALOG_PUBLICATION_STATUS)
@@ -400,11 +398,7 @@ async def get_config_entries(  # noqa: PLR0915
         if artifacts.state == SkillCreationState.DONE:
             artifacts = SkillCreationArtifacts()
         saved_skill_id = str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
-        if (
-            saved_skill_id
-            and artifacts.state == SkillCreationState.NONE
-            and not artifacts.skill_id
-        ):
+        if saved_skill_id and artifacts.state == SkillCreationState.NONE and not artifacts.skill_id:
             artifacts = dataclasses.replace(
                 artifacts,
                 state=SkillCreationState.APP_CREATED,
@@ -439,10 +433,7 @@ async def get_config_entries(  # noqa: PLR0915
         # Hard-delete the registered skill from Yandex and reset
         # artifacts so the Skill block flips back to its "create"
         # variant. Cached Passport sign-in is kept.
-        target_skill_id = (
-            artifacts.skill_id
-            or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
-        )
+        target_skill_id = artifacts.skill_id or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
         if not target_skill_id or not cached_x_token:
             update_message = "Nothing to delete — no skill_id on record."
         else:
@@ -638,18 +629,11 @@ async def get_config_entries(  # noqa: PLR0915
         # Manual snapshot fetch — single HTTP call, updates the cached
         # publication_status field. Used to track Yandex moderation
         # transitions (in_moderation → on_air) without re-deploying.
-        target_skill_id = (
-            artifacts.skill_id
-            or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
-        )
+        target_skill_id = artifacts.skill_id or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
         if not target_skill_id or not cached_x_token:
-            update_message = (
-                "Refresh status is only available after a skill has been registered."
-            )
+            update_message = "Refresh status is only available after a skill has been registered."
         else:
-            fetched = await fetch_skill_publication_status(
-                cached_x_token, target_skill_id
-            )
+            fetched = await fetch_skill_publication_status(cached_x_token, target_skill_id)
             if fetched is None:
                 update_message = (
                     "Could not fetch publication status — Yandex Dialogs is "
@@ -704,9 +688,7 @@ async def get_config_entries(  # noqa: PLR0915
         and artifacts.skill_id
         and cached_x_token
     ):
-        fetched_status = await fetch_skill_publication_status(
-            cached_x_token, artifacts.skill_id
-        )
+        fetched_status = await fetch_skill_publication_status(cached_x_token, artifacts.skill_id)
         if fetched_status is not None:
             publication_status = fetched_status
 
@@ -770,9 +752,7 @@ async def get_config_entries(  # noqa: PLR0915
     voice_value = _resolve_saved_value(values, CONF_DIALOG_SKILL_VOICE) or DIALOG_VOICE_DEFAULT
 
     # Surface a sign-in error in the Authorization block as ✗ LABEL.
-    sign_in_error: str | None = (
-        update_message if update_message and not cached_x_token else None
-    )
+    sign_in_error: str | None = update_message if update_message and not cached_x_token else None
     user_name = _resolve_saved_value(values, CONF_AUTH_USER_NAME)
     if not user_name and saved_provider is not None:
         try:
@@ -883,5 +863,3 @@ async def get_config_entries(  # noqa: PLR0915
         diagnostics=diagnostics_entries,
         hidden_state=hidden_state_entries,
     )
-
-

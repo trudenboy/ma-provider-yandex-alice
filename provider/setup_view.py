@@ -134,10 +134,10 @@ def _publication_status_banner(
             ConfigEntryType.ALERT,
         )
     return (
-        "ℹ️ Publication status not yet fetched — click Refresh status "
-        "to query Yandex Dialogs.",
+        "ℹ️ Publication status not yet fetched — click Refresh status to query Yandex Dialogs.",
         ConfigEntryType.LABEL,
     )
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -533,9 +533,7 @@ def _skill_registered_subblock(
     """DONE state: identity card + status banner + Edit / Refresh / Delete."""
     name = artifacts.last_known_name or skill_name or "Music Assistant"
     skill_id = artifacts.skill_id or ""
-    dev_console_url = (
-        f"https://dialogs.yandex.ru/developer/skills/{skill_id}" if skill_id else ""
-    )
+    dev_console_url = f"https://dialogs.yandex.ru/developer/skills/{skill_id}" if skill_id else ""
 
     status_text, status_entry_type = _publication_status_banner(publication_status)
     entries: list[ConfigEntry] = [
@@ -668,8 +666,7 @@ def _skill_registered_subblock(
             type=ConfigEntryType.ACTION,
             label="Update skill",
             description=(
-                "Pushes edits to Yandex via PATCH draft + re-deploy. "
-                "Yandex moderation: 5-15 min."
+                "Pushes edits to Yandex via PATCH draft + re-deploy. Yandex moderation: 5-15 min."
             ),
             action=CONF_ACTION_UPDATE_SKILL,
             action_label="Update skill",
