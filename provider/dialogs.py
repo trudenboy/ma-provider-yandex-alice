@@ -59,11 +59,13 @@ from .constants import (
     DIALOG_WEBHOOK_BASE_PATH,
 )
 from .dialogs_control import (
+    ParsedControl,
     control_confirmation,
     execute_control,
     format_list_players,
     parse_control,
 )
+from .dialogs_grammar import parse_platform_intent
 from .dialogs_nlu import (
     _VERB_RE,
     ParsedCommand,
@@ -598,6 +600,40 @@ class DialogsWebhookHandler:
         if not isinstance(nlu, dict):
             nlu = {}
         nlu_entities = nlu.get("entities") if isinstance(nlu.get("entities"), list) else None
+        nlu_intents = nlu.get("intents") if isinstance(nlu.get("intents"), dict) else None
+
+        # Phase 2 — platform-pre-classified intents take precedence over
+        # the regex parsers. When grammar matched the phrase upstream,
+        # the result lands in `request.nlu.intents.<form_name>`; map it
+        # back to our existing ParsedControl / ParsedCommand and skip the
+        # regex pass. Falls through to the regex parsers when the block
+        # is empty (no grammar declared or no match).
+        platform = parse_platform_intent(nlu_intents)
+        if isinstance(platform, ParsedControl):
+            self._logger.debug(
+                "Platform intent → control %r (skipping regex parser)", platform
+            )
+            return self._handle_control(
+                session=session,
+                control=platform,
+                default_id=default_id,
+                session_state_in=_without_pending(session_state_in),
+                app_state_in=app_state_in,
+                has_screen=has_screen,
+            )
+        if isinstance(platform, ParsedCommand):
+            self._logger.debug(
+                "Platform intent → play %r (skipping regex parser)", platform
+            )
+            return await self._dispatch_play(
+                session=session,
+                parsed=platform,
+                default_id=default_id,
+                session_state_in=session_state_in,
+                app_state_in=app_state_in,
+                has_screen=has_screen,
+            )
+
         if control := parse_control(command, entities=nlu_entities):
             self._logger.debug("Parsed dialog control %r → %r", command, control)
             return self._handle_control(

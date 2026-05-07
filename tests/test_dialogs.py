@@ -298,6 +298,89 @@ class TestSuggestionButtons:
 
 
 @pytest.mark.asyncio
+class TestPlatformIntentDispatch:
+    """Phase 2: request.nlu.intents pre-classification takes precedence over regex."""
+
+    def _handler(self, mass: MagicMock) -> DialogsWebhookHandler:
+        return DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
+
+    async def test_control_pause_via_platform_intent(self) -> None:
+        """`request.nlu.intents['control.pause']` → ParsedControl(action='pause')."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.pause = AsyncMock()
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "пауза",
+                "nlu": {"intents": {"control.pause": {}}},
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        assert resp.status == 200
+        # Pause was dispatched even though command="пауза" would also match regex.
+        mass.player_queues.pause.assert_awaited_once_with("p1")
+
+    async def test_play_my_wave_via_platform_intent(self) -> None:
+        """`request.nlu.intents['play.my_wave']` → ParsedCommand(kind='my_wave')."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        # _resolve_my_wave returns None when yandex_music provider absent → handler
+        # surfaces "не нашёл такую музыку" but still went through the my_wave path.
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                # `command` is the noisy raw — wouldn't normally classify as my_wave,
+                # but the platform intent overrides it.
+                "command": "что-то совсем другое",
+                "nlu": {"intents": {"play.my_wave": {}}},
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        # Platform path responded — it didn't fall through to "не понял".
+        # When yandex_music isn't available, the response is a graceful
+        # "не нашёл такую музыку" rather than "не понял команду".
+        assert "не понял" not in body_out["response"]["text"].lower()
+
+    async def test_unrecognised_intent_falls_back_to_regex(self) -> None:
+        """Unknown form_name in intents → falls through to parse_control / parse_command."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.pause = AsyncMock()
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "пауза",
+                # Unknown intent form_name — regex should pick it up instead.
+                "nlu": {"intents": {"unknown.intent": {}}},
+            },
+        }
+        await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        # Regex parse_control caught "пауза" and dispatched.
+        mass.player_queues.pause.assert_awaited_once_with("p1")
+
+    async def test_empty_intents_block_falls_back_to_regex(self) -> None:
+        """Empty `intents={}` (no grammar match) → regex parser still runs."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.next = AsyncMock()
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "следующая",
+                "nlu": {"intents": {}},
+            },
+        }
+        await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        mass.player_queues.next.assert_awaited_once_with("p1")
+
+
+@pytest.mark.asyncio
 class TestVoiceContinuation:
     """Phase 1 / P1.4: opt-in `end_session=false` after play / control success."""
 
