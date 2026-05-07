@@ -109,7 +109,8 @@ def _publication_status_banner(
     if status == STATUS_ON_AIR:
         return (
             "✅ Yandex moderation passed — your skill is on air. "
-            "Try saying «Алиса, попроси … включи джаз» to your Yandex Station.",
+            "Voice commands routed via Alice will now reach this skill on "
+            "your Yandex Station.",
             ConfigEntryType.LABEL,
         )
     if status == STATUS_IN_MODERATION:
@@ -274,8 +275,8 @@ def _skill_create_subblock(
             label="Skill name",
             description=(
                 "At least 2 words. Globally unique across all Yandex "
-                "skills. Examples: 'Music Assistant', "
-                "'Музыкальный Ассистент', 'Домашняя Музыка'."
+                "skills. Examples: 'Music Assistant', 'My Music', "
+                "'Home Audio'."
             ),
             required=False,
             value=skill_name,
@@ -617,8 +618,8 @@ def _skill_registered_subblock(
             type=ConfigEntryType.STRING,
             label="Skill name (activation phrase #1)",
             description=(
-                "At least 2 words. This is what users say to Alice "
-                "after «Алиса, попроси …»."
+                "At least 2 words. This is the activation phrase users "
+                "say to Alice to invoke your skill."
             ),
             required=False,
             value=skill_name,

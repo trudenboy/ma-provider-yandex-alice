@@ -118,15 +118,15 @@ CONF_USE_DIFFERENT_INSTANCE_NAME = "use_different_instance_name"
 # Voice selection rarely matters for voice-control skills (the user
 # hears Alice, not the skill's TTS), but we expose it for completeness.
 DIALOG_VOICE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("good_oksana", "Оксана (default)"),
-    ("jane", "Джейн"),
-    ("zahar", "Захар"),  # noqa: RUF001
-    ("ermil", "Эрмил"),
-    ("erkanyavas", "Эркан Явас"),
-    ("shitova.us", "Алиса"),
-    ("kostya.gpu", "Костя"),
-    ("valtz.gpu", "Филипп"),
-    ("tatyana_abramova.gpu", "Аня"),
+    ("good_oksana", "Oksana (default)"),
+    ("jane", "Jane"),
+    ("zahar", "Zakhar"),
+    ("ermil", "Yermil"),
+    ("erkanyavas", "Erkan Yavas"),
+    ("shitova.us", "Alisa"),
+    ("kostya.gpu", "Kostya"),
+    ("valtz.gpu", "Filipp"),
+    ("tatyana_abramova.gpu", "Anya"),
 )
 DIALOG_VOICE_DEFAULT = "good_oksana"
 
