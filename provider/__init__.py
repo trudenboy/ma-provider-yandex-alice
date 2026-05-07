@@ -23,8 +23,9 @@ import time
 from typing import TYPE_CHECKING
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
+from music_assistant_models.constants import SECURE_STRING_SUBSTITUTE
 from music_assistant_models.enums import ConfigEntryType, ProviderFeature
-from music_assistant_models.errors import LoginFailed
+from music_assistant_models.errors import InvalidDataError, LoginFailed
 from ya_dialogs_api import (
     SkillCreationArtifacts,
     SkillCreationState,
@@ -40,25 +41,27 @@ from .auto_create import (
     delete_existing_skill_then_recreate,
     run_create_skill,
 )
-from .auto_create_view import build_auto_create_entries
 from .auto_update import run_auto_update
 from .constants import (
-    CATEGORY_ADVANCED,
-    CATEGORY_SETUP,
-    CATEGORY_VOICE,
     CONF_ACTION_ADOPT_EXISTING,
     CONF_ACTION_AUTO_CREATE_DIALOG,
     CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
     CONF_ACTION_CANCEL_EDIT,
+    CONF_ACTION_CLEAR_AUTH,
+    CONF_ACTION_DELETE_SKILL,
     CONF_ACTION_EDIT_SKILL,
     CONF_ACTION_RECREATE_DUPLICATE,
     CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
     CONF_ACTION_RENAME_DIALOG_SKILL,
     CONF_ACTION_REVERT_SKILL_NAME,
+    CONF_ACTION_SIGN_IN,
     CONF_ACTION_TEST_WEBHOOK,
     CONF_ACTION_UPDATE_SKILL,
+    CONF_AUTH_USER_NAME,
     CONF_AUTH_X_TOKEN,
-    CONF_DIALOG_ACTIVATION_PHRASES,
+    CONF_DIALOG_ACTIVATION_PHRASE_2,
+    CONF_DIALOG_ACTIVATION_PHRASE_3,
+    CONF_DIALOG_ACTIVATION_PHRASE_4,
     CONF_DIALOG_AUTO_CREATE_ARTIFACTS,
     CONF_DIALOG_SKILL_ID,
     CONF_DIALOG_SKILL_NAME,
@@ -66,27 +69,22 @@ from .constants import (
     CONF_DIALOG_SKILL_VOICE,
     CONF_DIALOG_WEBHOOK_SECRET,
     CONF_EDIT_MODE,
-    CONF_EXPOSED_PLAYERS,
     CONF_EXTERNAL_BASE_URL,
     CONF_INSTANCE_NAME,
     CONF_PENDING_DUPLICATE_SKILL_ID,
     CONF_PENDING_DUPLICATE_SKILL_NAME,
     CONF_USE_DIFFERENT_INSTANCE_NAME,
     DIALOG_DEFAULT_NAME,
-    DIALOG_NAME_MAX_LEN,
-    DIALOG_NAME_MIN_LEN,
     DIALOG_VOICE_DEFAULT,
-    DIALOG_WEBHOOK_BASE_PATH,
-    YANDEX_DIALOGS_DEVELOPER_URL,
 )
 from .dialog_skill_meta import (
     build_activation_phrases,
     build_backend_uri,
     build_skill_description,
     build_structured_examples,
-    validate_skill_name,
 )
 from .plugin import YandexAlicePlugin
+from .setup_view import build_form_entries
 from .url_helpers import (
     is_public_https_url,
     try_detect_any_base_url,
@@ -119,6 +117,24 @@ async def setup(
 def _generate_webhook_secret() -> str:
     """Return a fresh URL-safe random secret for the webhook path."""
     return secrets.token_urlsafe(24)
+
+
+async def _delete_skill_in_yandex(x_token: str, skill_id: str) -> None:
+    """Hard-delete a skill from the user's Yandex Dialogs account.
+
+    Used by the *Delete skill* action button in Step 3 edit mode.
+    Errors propagate to the caller (the dispatcher) which wraps them
+    in a user-visible LABEL.
+    """
+    from ya_dialogs_api import DialogsSkillCreator  # noqa: PLC0415
+
+    from .auth_session import cached_authenticated_session  # noqa: PLC0415
+    from .constants import DIALOG_CHANNEL  # noqa: PLC0415
+
+    async with cached_authenticated_session(x_token) as session:
+        creator = DialogsSkillCreator(session, channel=DIALOG_CHANNEL)
+        csrf = await creator.fetch_csrf()
+        await creator.delete_skill(csrf, skill_id)
 
 
 async def _list_player_options(mass: MusicAssistant) -> list[ConfigValueOption]:
@@ -175,7 +191,6 @@ def _build_diagnostics_entries(
                     "(skill disabled or credentials missing)."
                 ),
                 advanced=True,
-                category=CATEGORY_ADVANCED,
             ),
         )
 
@@ -203,7 +218,6 @@ def _build_diagnostics_entries(
             type=ConfigEntryType.LABEL,
             label=summary,
             advanced=True,
-            category=CATEGORY_ADVANCED,
         ),
     )
 
@@ -232,7 +246,6 @@ def _build_instance_name_section(
             required=False,
             default_value=False,
             advanced=True,
-            category=CATEGORY_ADVANCED,
         ),
     ]
     if use_different:
@@ -249,7 +262,6 @@ def _build_instance_name_section(
                 required=False,
                 default_value=instance_name or DIALOG_DEFAULT_NAME,
                 advanced=True,
-                category=CATEGORY_ADVANCED,
                 depends_on=CONF_USE_DIFFERENT_INSTANCE_NAME,
                 depends_on_value=True,
             )
@@ -377,23 +389,20 @@ def _build_identity_card_entries(
 ) -> tuple[ConfigEntry, ...]:
     """Render a compact "identity card" once the skill is registered + on-air.
 
-    Replaces the bare ``Skill ID`` / ``Webhook URL secret`` editable inputs at
-    the top of the form with a read-only summary: skill name, skill UUID,
-    full webhook URL (copyable), and a ``help_link`` shortcut to the dev
-    console. The original input fields are still rendered below this card —
-    moved to ``advanced=True`` and ``read_only=True`` (see callers) so manual
-    edits stay possible but don't clutter the default view.
+    Webhook URL is exposed as a read-only STRING (selectable / copyable
+    from the input). The Yandex Dialogs dev console link is rendered as
+    an ACTION with ``help_link`` — that gives the user a clickable
+    button MA's frontend opens in a new tab.
     """
     if not is_configured or not artifacts.skill_id:
         return ()
 
-    base = (external_base_url or "").rstrip("/")
-    full_webhook_url = (
-        f"{base}{DIALOG_WEBHOOK_BASE_PATH}/{webhook_secret}" if base else "(not assembled)"
-    )
-    dev_console_url = f"https://dialogs.yandex.ru/developer/skills/{artifacts.skill_id}"
     skill_label = artifacts.last_known_name or "(name unknown)"
-
+    dev_console_url = f"https://dialogs.yandex.ru/developer/skills/{artifacts.skill_id}"
+    # Webhook URL is constructed from external_base_url + webhook_secret
+    # but we no longer surface it here as a read-only field — the
+    # editable secret + base URL live in their own sections.
+    _ = external_base_url, webhook_secret
     return (
         ConfigEntry(
             key="label_identity_card_header",
@@ -401,15 +410,16 @@ def _build_identity_card_entries(
             label=f"✓ Configured: «{skill_label}» — Skill ID: {artifacts.skill_id}",
         ),
         ConfigEntry(
-            key="label_identity_card_webhook",
-            type=ConfigEntryType.LABEL,
-            label=f"Webhook URL (copy into Yandex Dialogs if asked): {full_webhook_url}",
-        ),
-        ConfigEntry(
-            key="label_identity_card_dev_console",
-            type=ConfigEntryType.LABEL,
-            label=f"Open in Yandex Dialogs dev console: {dev_console_url}",
-            help_link=dev_console_url,
+            key="identity_card_dev_console_url",
+            type=ConfigEntryType.STRING,
+            label="Yandex Dialogs dev console",
+            description=(
+                "Copy this URL and open it in your browser to manage the "
+                "skill in the Yandex Dialogs developer console."
+            ),
+            required=False,
+            value=dev_console_url,
+            default_value="",
         ),
     )
 
@@ -418,18 +428,69 @@ def _resolve_saved_value(
     values: dict[str, ConfigValueType],
     key: str,
 ) -> str:
-    """Read a config value from form ``values`` (string-coerced).
-
-    Earlier versions also fell through to ``mass.config.get_provider_config``
-    for keys the frontend may not echo back. That call deadlocks against the
-    config controller's own lock when MA opens the provider settings page —
-    `get_config_entries` is invoked by MA *while* it holds the config lock,
-    and the recursive read blocks indefinitely. So we now rely solely on
-    ``values``, and stabilise critical SECURE_STRING fields by writing the
-    derived value back into ``values`` early in the dispatcher (so subsequent
-    action clicks within the same form session see the same value).
-    """
+    """Read a plain config value from form ``values`` (string-coerced)."""
     return str(values.get(key) or "")
+
+
+def _saved_provider_config(mass: MusicAssistant, instance_id: str | None) -> object | None:
+    """Cache helper: return the running provider's ``.config`` once per render.
+
+    SECURE_STRING fallback (see :func:`_resolve_secure_string_from`)
+    has to look up the persisted value for *every* token field on
+    every dispatcher invocation. Calling ``mass.get_provider`` 3-4
+    times per render is harmless but redundant; this helper resolves
+    it once and reuses the same object for the lifetime of the call.
+    """
+    if not instance_id:
+        return None
+    try:
+        prov = mass.get_provider(instance_id)
+    except Exception as exc:
+        _LOGGER.debug("saved_provider_config lookup failed: %r", exc)
+        return None
+    return getattr(prov, "config", None) if prov is not None else None
+
+
+def _resolve_secure_string_from(
+    saved_config: object | None,
+    values: dict[str, ConfigValueType],
+    key: str,
+) -> str:
+    """Read a SECURE_STRING value, resolving the FE substitute.
+
+    MA's frontend never echoes the actual SECURE_STRING value back to
+    the backend — instead it sends ``SECURE_STRING_SUBSTITUTE``
+    ("this_value_is_encrypted") whenever the user hasn't edited the
+    field. Reading ``values[key]`` raw would therefore hand us the
+    substitute marker, not the real token, and any downstream call
+    would fail with an opaque auth error.
+
+    Behaviour, in order:
+
+    1. Use the user-supplied value from ``values`` only when it's
+       non-empty AND not the substitute marker (user just typed in a
+       fresh secret).
+    2. Otherwise fall back to the persisted value via
+       ``saved_config.get_value(key)`` — same pattern as
+       ``yandex_smarthome._resolve_direct_client_secret``.
+    3. Empty string if neither path yields a value.
+
+    The ``saved_config`` argument is the running provider's
+    ``ProviderConfig`` (resolved once per render via
+    :func:`_saved_provider_config`) — this avoids repeatedly calling
+    ``mass.get_provider`` for every secure field on every dispatch.
+    """
+    raw = str(values.get(key) or "")
+    if raw and raw != SECURE_STRING_SUBSTITUTE:
+        return raw
+    if saved_config is None:
+        return ""
+    try:
+        saved = saved_config.get_value(key)  # type: ignore[attr-defined]
+    except Exception as exc:
+        _LOGGER.debug("secure-string fallback failed for %s: %r", key, exc)
+        return ""
+    return str(saved or "")
 
 
 async def get_config_entries(  # noqa: PLR0915
@@ -450,10 +511,9 @@ async def get_config_entries(  # noqa: PLR0915
     - ``CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW`` — drop pending session +
       reset artifacts; preserve cached x_token.
 
-    Auto-create / rename state lives in three hidden config entries
-    (``CONF_AUTH_X_TOKEN``, ``CONF_DIALOG_AUTO_CREATE_ARTIFACTS``,
-    ``CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION``) that round-trip through the
-    form on every save.
+    Auto-create / rename state lives in two hidden config entries
+    (``CONF_AUTH_X_TOKEN``, ``CONF_DIALOG_AUTO_CREATE_ARTIFACTS``)
+    that round-trip through the form on every save.
     """
     values = values or {}
 
@@ -462,8 +522,14 @@ async def get_config_entries(  # noqa: PLR0915
     # SECURE_STRING fields between action clicks, and regenerating the
     # secret per call would orphan webhooks already registered with Yandex
     # against an earlier (now-discarded) secret.
-    _ = instance_id  # reserved for future per-instance config lookups
-    existing_secret = _resolve_saved_value(values, CONF_DIALOG_WEBHOOK_SECRET).strip()
+    # Resolve the running provider config once (#9) — sibling lookups
+    # for SECURE_STRING substitute fallback all share this handle, so
+    # we don't call ``mass.get_provider`` redundantly per render.
+    saved_provider = _saved_provider_config(mass, instance_id)
+
+    existing_secret = _resolve_secure_string_from(
+        saved_provider, values, CONF_DIALOG_WEBHOOK_SECRET
+    ).strip()
     default_secret = existing_secret or _generate_webhook_secret()
     # Stabilise inside this dispatch: any backend_uri assembled below uses
     # the same secret as the form will save on user click.
@@ -475,7 +541,10 @@ async def get_config_entries(  # noqa: PLR0915
     artifacts = load_artifacts(
         _resolve_saved_value(values, CONF_DIALOG_AUTO_CREATE_ARTIFACTS) or None
     )
-    cached_x_token = _resolve_saved_value(values, CONF_AUTH_X_TOKEN)
+    cached_x_token = _resolve_secure_string_from(saved_provider, values, CONF_AUTH_X_TOKEN)
+    skill_token_value = _resolve_secure_string_from(
+        saved_provider, values, CONF_DIALOG_SKILL_TOKEN
+    )
 
     # Skill name priority: explicit dialog skill name → instance name → default.
     skill_name = (
@@ -491,91 +560,101 @@ async def get_config_entries(  # noqa: PLR0915
     update_message: str | None = None
 
     # ---- Action dispatcher ----
-    if action == CONF_ACTION_AUTO_CREATE_DIALOG:
-        # The single Step 1/2 button does two things depending on auth state:
-        #   - No cached_x_token → blocking Yandex Passport sign-in (Step 1).
-        #   - Have cached_x_token → run the create_skill pipeline (Step 2).
-        if not cached_x_token:
-            # Step 1: blocking Device Flow with popup. session_id MUST come
-            # from values["session_id"] — that's the channel the MA frontend
-            # listens on for the AUTH_SESSION popup signal.
-            session_id_raw = values.get("session_id")
-            session_id = str(session_id_raw or "").strip()
-            if not session_id:
-                artifacts = dataclasses.replace(
+    if action == CONF_ACTION_SIGN_IN:
+        # Authorization block: blocking Device Flow with popup.
+        # session_id MUST come from values["session_id"] — that's the
+        # channel the MA frontend listens on for the AUTH_SESSION
+        # popup signal.
+        session_id_raw = values.get("session_id")
+        session_id = str(session_id_raw or "").strip()
+        if not session_id:
+            msg = "Missing session_id for device authentication"
+            raise InvalidDataError(msg)
+        try:
+            cached_x_token, display_login = await perform_device_auth(
+                mass, session_id, skill_name=skill_name
+            )
+            values[CONF_AUTH_USER_NAME] = display_login
+        except LoginFailed as exc:
+            update_message = str(exc)
+        except Exception as exc:
+            _LOGGER.exception("yandex-alice: sign-in raised unexpectedly")
+            update_message = f"Sign-in error: {exc!r}"
+
+    elif action == CONF_ACTION_CLEAR_AUTH:
+        # Sign out — drop the cached x_token + cached display name.
+        # Skill artifacts are reset too so the form snaps back to a
+        # clean "needs sign-in" state. The skill itself stays in
+        # Yandex; user can re-sign-in to resume managing it.
+        cached_x_token = ""
+        values[CONF_AUTH_USER_NAME] = ""
+        artifacts = SkillCreationArtifacts()
+        values[CONF_PENDING_DUPLICATE_SKILL_ID] = ""
+        values[CONF_PENDING_DUPLICATE_SKILL_NAME] = ""
+
+    elif action == CONF_ACTION_AUTO_CREATE_DIALOG:
+        # Skill block: Create skill (blocking pipeline).
+        # Re-click on DONE → reset artifacts so we run a fresh
+        # create_app (after Delete skill). Backup-restore safety —
+        # if a skill_id is in config but artifacts are NONE, pre-set
+        # APP_CREATED so the library skips create_app.
+        if artifacts.state == SkillCreationState.DONE:
+            artifacts = SkillCreationArtifacts()
+        saved_skill_id = str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
+        if (
+            saved_skill_id
+            and artifacts.state == SkillCreationState.NONE
+            and not artifacts.skill_id
+        ):
+            artifacts = dataclasses.replace(
+                artifacts,
+                state=SkillCreationState.APP_CREATED,
+                skill_id=saved_skill_id,
+            )
+
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            action_outcome = AutoCreateOutcome(
+                artifacts=dataclasses.replace(
                     artifacts,
                     state=SkillCreationState.FAILED,
-                    last_error=(
-                        "Missing session_id from the config-flow frontend. "
-                        "Sign-in needs the id MA's frontend supplies on every "
-                        "ACTION invocation."
-                    ),
-                )
-            else:
-                try:
-                    cached_x_token = await perform_device_auth(
-                        mass, session_id, skill_name=skill_name
-                    )
-                except LoginFailed as exc:
-                    artifacts = dataclasses.replace(
-                        artifacts,
-                        state=SkillCreationState.FAILED,
-                        last_error=str(exc),
-                    )
-                    update_message = str(exc)
-                except Exception as exc:
-                    _LOGGER.exception("yandex-alice: sign-in raised unexpectedly")
-                    artifacts = dataclasses.replace(
-                        artifacts,
-                        state=SkillCreationState.FAILED,
-                        last_error=f"Sign-in error: {exc!r}",
-                    )
-                    update_message = f"Sign-in error: {exc!r}"
+                    last_error=str(exc),
+                ),
+                x_token=None,
+                user_message=str(exc),
+                stage=LocalAutoCreateStage.FAILED,
+            )
         else:
-            # Step 2: blocking create_skill pipeline (or Recreate path).
-            # Treat re-click on DONE as "Re-create" → reset artifacts.
-            if artifacts.state == SkillCreationState.DONE:
-                artifacts = SkillCreationArtifacts()
+            action_outcome = await run_create_skill(
+                cached_x_token=cached_x_token,
+                skill_name=skill_name,
+                backend_uri=backend_uri,
+                description=build_skill_description(skill_name),
+                structured_examples=build_structured_examples(skill_name),
+                activation_phrases=build_activation_phrases(skill_name),
+                artifacts=artifacts,
+            )
 
-            # Backup-restore safety: skill_id is set in config but artifacts
-            # are NONE → pre-position to APP_CREATED so the library skips
-            # create_app and patches the existing skill rather than
-            # creating a duplicate.
-            saved_skill_id = str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
-            if (
-                saved_skill_id
-                and artifacts.state == SkillCreationState.NONE
-                and not artifacts.skill_id
-            ):
-                artifacts = dataclasses.replace(
-                    artifacts,
-                    state=SkillCreationState.APP_CREATED,
-                    skill_id=saved_skill_id,
-                )
-
+    elif action == CONF_ACTION_DELETE_SKILL:
+        # Hard-delete the registered skill from Yandex and reset
+        # artifacts so the Skill block flips back to its "create"
+        # variant. Cached Passport sign-in is kept.
+        target_skill_id = (
+            artifacts.skill_id
+            or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
+        )
+        if not target_skill_id or not cached_x_token:
+            update_message = "Nothing to delete — no skill_id on record."
+        else:
             try:
-                backend_uri = build_backend_uri(external_base_url, webhook_secret)
-            except ValueError as exc:
-                action_outcome = AutoCreateOutcome(
-                    artifacts=dataclasses.replace(
-                        artifacts,
-                        state=SkillCreationState.FAILED,
-                        last_error=str(exc),
-                    ),
-                    x_token=None,
-                    user_message=str(exc),
-                    stage=LocalAutoCreateStage.FAILED,
-                )
-            else:
-                action_outcome = await run_create_skill(
-                    cached_x_token=cached_x_token,
-                    skill_name=skill_name,
-                    backend_uri=backend_uri,
-                    description=build_skill_description(skill_name),
-                    structured_examples=build_structured_examples(skill_name),
-                    activation_phrases=build_activation_phrases(skill_name),
-                    artifacts=artifacts,
-                )
+                await _delete_skill_in_yandex(cached_x_token, target_skill_id)
+                update_message = "Skill deleted from Yandex Dialogs."
+                artifacts = SkillCreationArtifacts()
+                values[CONF_DIALOG_SKILL_ID] = ""
+            except Exception as exc:
+                _LOGGER.exception("yandex-alice: delete_skill failed")
+                update_message = f"Failed to delete skill: {exc!r}"
 
     elif action == CONF_ACTION_RECREATE_DUPLICATE:
         existing_id = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_ID).strip()
@@ -637,16 +716,20 @@ async def get_config_entries(  # noqa: PLR0915
         values[CONF_EDIT_MODE] = False
 
     elif action == CONF_ACTION_UPDATE_SKILL:
-        # Edit-mode commit — pushes user-edited activation_phrases / voice
-        # to Yandex via the same auto_update_skill path used by Rename.
-        edited_phrases_raw = str(values.get(CONF_DIALOG_ACTIVATION_PHRASES) or "").strip()
-        if edited_phrases_raw:
-            edited_phrases: list[str] | None = [
-                line.strip() for line in edited_phrases_raw.splitlines() if line.strip()
-            ]
-            if not edited_phrases:
-                edited_phrases = build_activation_phrases(skill_name)
-        else:
+        # Edit-mode commit — pushes the edited skill_name + up to 3
+        # alternative activation phrases + voice to Yandex via
+        # auto_update_skill. The skill_name itself is the first
+        # activation phrase; empty alt slots are skipped.
+        edited_phrases: list[str] = [skill_name.strip()] if skill_name.strip() else []
+        for key in (
+            CONF_DIALOG_ACTIVATION_PHRASE_2,
+            CONF_DIALOG_ACTIVATION_PHRASE_3,
+            CONF_DIALOG_ACTIVATION_PHRASE_4,
+        ):
+            extra = str(values.get(key) or "").strip()
+            if extra:
+                edited_phrases.append(extra)
+        if not edited_phrases:
             edited_phrases = build_activation_phrases(skill_name)
         edited_voice = (
             str(values.get(CONF_DIALOG_SKILL_VOICE) or "").strip() or DIALOG_VOICE_DEFAULT
@@ -667,11 +750,17 @@ async def get_config_entries(  # noqa: PLR0915
                 voice=edited_voice,
                 artifacts=artifacts,
             )
-            artifacts = update_outcome.artifacts
             update_message = update_outcome.user_message
             if update_outcome.x_token == "":
                 cached_x_token = ""
-            values[CONF_EDIT_MODE] = False
+            if update_outcome.artifacts.state == SkillCreationState.DONE:
+                # Successful update — pick up the refreshed snapshot
+                # (e.g. last_known_name advanced) and exit edit mode.
+                artifacts = update_outcome.artifacts
+                values[CONF_EDIT_MODE] = False
+            # Else: keep the existing DONE artifacts so the form stays
+            # in Step 3 edit mode with the error LABEL on top — flipping
+            # to artifacts.state=FAILED would route us back to Step 2.
 
     elif action == CONF_ACTION_RENAME_DIALOG_SKILL:
         try:
@@ -764,8 +853,6 @@ async def get_config_entries(  # noqa: PLR0915
     if artifacts.state == SkillCreationState.DONE and artifacts.skill_id:
         values[CONF_DIALOG_SKILL_ID] = artifacts.skill_id
 
-    is_configured = artifacts.state == SkillCreationState.DONE and bool(artifacts.skill_id)
-
     # ---- Player options for voice exposure ----
     player_options = await _list_player_options(mass)
 
@@ -818,49 +905,25 @@ async def get_config_entries(  # noqa: PLR0915
     duplicate_skill_id = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_ID).strip()
     duplicate_skill_name = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_NAME).strip()
     edit_mode = bool(values.get(CONF_EDIT_MODE, False))
-    activation_phrases_value = _resolve_saved_value(values, CONF_DIALOG_ACTIVATION_PHRASES)
+    activation_phrase_2_value = _resolve_saved_value(values, CONF_DIALOG_ACTIVATION_PHRASE_2)
+    activation_phrase_3_value = _resolve_saved_value(values, CONF_DIALOG_ACTIVATION_PHRASE_3)
+    activation_phrase_4_value = _resolve_saved_value(values, CONF_DIALOG_ACTIVATION_PHRASE_4)
     voice_value = _resolve_saved_value(values, CONF_DIALOG_SKILL_VOICE) or DIALOG_VOICE_DEFAULT
 
-    # Surface a sign-in error in Step 1 LABEL, otherwise None.
-    step1_error: str | None = None
-    if (
-        not cached_x_token
-        and artifacts.state == SkillCreationState.FAILED
-        and artifacts.last_error
-    ):
-        step1_error = artifacts.last_error
-
-    auto_create_entries = build_auto_create_entries(
-        artifacts=artifacts,
-        cached_x_token_present=bool(cached_x_token),
-        action_outcome=action_outcome,
-        duplicate_skill_id=duplicate_skill_id or None,
-        duplicate_skill_name=duplicate_skill_name or None,
-        edit_mode=edit_mode,
-        skill_name=skill_name,
-        activation_phrases=activation_phrases_value,
-        voice=voice_value,
-        update_message=update_message,
-        last_error=step1_error,
-        external_base_url=external_base_url,
-        base_url_description=base_url_description,
-        base_url_valid=bool(external_base_url) and is_public_https_url(external_base_url),
+    # Surface a sign-in error in the Authorization block as ✗ LABEL.
+    sign_in_error: str | None = (
+        update_message if update_message and not cached_x_token else None
     )
-
-    # ---- Rename cluster: drift LABELs (preview + #13 revert) + Rename ACTION ----
-    rename_entries = _build_rename_cluster(
-        artifacts=artifacts,
-        cached_x_token=cached_x_token,
-        skill_name=skill_name,
-        update_message=update_message,
-    )
+    user_name = _resolve_saved_value(values, CONF_AUTH_USER_NAME)
+    if not user_name and saved_provider is not None:
+        try:
+            user_name = str(saved_provider.get_value(CONF_AUTH_USER_NAME) or "")  # type: ignore[attr-defined]
+        except Exception:
+            user_name = ""
 
     # ---- Hidden state-carrier entries (round-trip persistence) ----
     # Use ``value=`` (not ``default_value=``) so MA frontend round-trips
-    # the actual current state on form Save. ``default_value`` is only
-    # the FE-side fallback when the user hasn't touched the field, and
-    # for hidden fields that path never fires — the value would never
-    # make it back into the saved provider config.
+    # the actual current state on form Save.
     hidden_state_entries = (
         ConfigEntry(
             key=CONF_AUTH_X_TOKEN,
@@ -869,6 +932,15 @@ async def get_config_entries(  # noqa: PLR0915
             description="Cached after first successful Device Flow.",
             required=False,
             value=cached_x_token,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_AUTH_USER_NAME,
+            type=ConfigEntryType.STRING,
+            label="Yandex display login (cached)",
+            description="Surfaced as 'Authorized as <login>' banner.",
+            required=False,
+            value=user_name,
             hidden=True,
         ),
         ConfigEntry(
@@ -884,8 +956,7 @@ async def get_config_entries(  # noqa: PLR0915
             key=CONF_PENDING_DUPLICATE_SKILL_ID,
             type=ConfigEntryType.STRING,
             label="Pending duplicate skill_id",
-            description="Persisted between clicks when the duplicate-name "
-            "pre-check finds a same-name skill in the user's account.",
+            description="Persisted when duplicate-name pre-check finds a match.",
             required=False,
             value=duplicate_skill_id,
             hidden=True,
@@ -903,175 +974,42 @@ async def get_config_entries(  # noqa: PLR0915
             key=CONF_EDIT_MODE,
             type=ConfigEntryType.BOOLEAN,
             label="Edit mode",
-            description="Reveals editable activation phrases / voice fields in Step 3.",
+            description="Reveals editable activation phrases / voice fields.",
             required=False,
             value=edit_mode,
             hidden=True,
         ),
-        ConfigEntry(
-            key=CONF_DIALOG_ACTIVATION_PHRASES,
-            type=ConfigEntryType.STRING,
-            label="Activation phrases (edit mode)",
-            description="Pushed to Yandex on 'Update skill' (Step 3 edit mode).",
-            required=False,
-            value=activation_phrases_value,
-            hidden=True,
-        ),
-        ConfigEntry(
-            key=CONF_DIALOG_SKILL_VOICE,
-            type=ConfigEntryType.STRING,
-            label="TTS voice (edit mode)",
-            description="Pushed to Yandex on 'Update skill' (Step 3 edit mode).",
-            required=False,
-            value=voice_value,
-            hidden=True,
-        ),
     )
 
-    # ---- Diagnostics LABEL (Advanced section) — pulled from running plugin ----
     diagnostics_entries = _build_diagnostics_entries(mass, instance_id)
-
-    # ---- Instance-name split toggle (#1) — power users only, default merged ----
     use_different_instance_name = bool(values.get(CONF_USE_DIFFERENT_INSTANCE_NAME, False))
-    instance_name_section = _build_instance_name_section(
-        instance_name=instance_name,
+
+    return build_form_entries(
+        artifacts=artifacts,
+        cached_x_token_present=bool(cached_x_token),
+        user_name=user_name,
+        skill_id_value=str(values.get(CONF_DIALOG_SKILL_ID) or "").strip(),
+        skill_token_value=skill_token_value,
+        webhook_secret=default_secret,
+        last_error=sign_in_error,
+        action_outcome=action_outcome,
+        duplicate_skill_id=duplicate_skill_id or None,
+        duplicate_skill_name=duplicate_skill_name or None,
+        edit_mode=edit_mode,
         skill_name=skill_name,
-        use_different=use_different_instance_name,
+        activation_phrase_2=activation_phrase_2_value,
+        activation_phrase_3=activation_phrase_3_value,
+        activation_phrase_4=activation_phrase_4_value,
+        voice=voice_value,
+        update_message=update_message,
+        external_base_url=external_base_url,
+        base_url_description=base_url_description,
+        base_url_valid=bool(external_base_url) and is_public_https_url(external_base_url),
+        player_options=player_options,
+        instance_name=instance_name,
+        use_different_instance_name=use_different_instance_name,
+        diagnostics=diagnostics_entries,
+        hidden_state=hidden_state_entries,
     )
 
-    return (
-        # ===== Setup section =====
-        ConfigEntry(
-            key="label_intro",
-            type=ConfigEntryType.LABEL,
-            label=(
-                "Yandex Alice voice control. Sign in to Yandex Passport "
-                "below — Music Assistant will register a custom dialog "
-                f"skill at {YANDEX_DIALOGS_DEVELOPER_URL} on your behalf."
-            ),
-            category=CATEGORY_SETUP,
-        ),
-        ConfigEntry(
-            key=CONF_DIALOG_SKILL_NAME,
-            type=ConfigEntryType.STRING,
-            label="Skill name",
-            description=(
-                "At least 2 words. Globally unique across all Yandex skills. "
-                "Examples: 'Music Assistant', 'Музыкальный Ассистент', "
-                "'Домашняя Музыка'. "
-                f"Min {DIALOG_NAME_MIN_LEN}, max {DIALOG_NAME_MAX_LEN} characters."
-            ),
-            required=False,
-            value=str(values.get(CONF_DIALOG_SKILL_NAME) or "") or skill_name,
-            default_value=instance_name,
-            validate=validate_skill_name,
-            category=CATEGORY_SETUP,
-        ),
-        # External base URL + Test webhook now live INSIDE Step 2
-        # (rendered by build_auto_create_entries) so the user sees the
-        # field exactly when it's required, right above the action.
-        *auto_create_entries,
-        *rename_entries,
-        *_build_identity_card_entries(artifacts, default_secret, external_base_url, is_configured),
-        # ===== Voice control section =====
-        ConfigEntry(
-            key=CONF_EXPOSED_PLAYERS,
-            type=ConfigEntryType.STRING,
-            label="Voice-controllable players",
-            description=(
-                "Players Alice is allowed to control. Leave empty to "
-                "expose all players known to MA — Alice will then accept "
-                "voice commands for any player by name."
-            ),
-            multi_value=True,
-            options=player_options,
-            required=False,
-            default_value=[],
-            category=CATEGORY_VOICE,
-        ),
-        # ===== Advanced section =====
-        *instance_name_section,
-        ConfigEntry(
-            key=CONF_DIALOG_SKILL_ID,
-            type=ConfigEntryType.STRING,
-            label="Skill ID",
-            description=(
-                "UUID of the skill — populated automatically after a "
-                "successful auto-create, or paste manually if you set up "
-                "the skill yourself."
-            ),
-            required=False,
-            value=str(values.get(CONF_DIALOG_SKILL_ID) or ""),
-            default_value="",
-            read_only=is_configured,
-            advanced=True,
-            category=CATEGORY_ADVANCED,
-        ),
-        ConfigEntry(
-            key=CONF_DIALOG_SKILL_TOKEN,
-            type=ConfigEntryType.SECURE_STRING,
-            label="Skill OAuth token (manual setup only)",
-            description=(
-                "Optional OAuth token from "
-                "https://oauth.yandex.ru/authorize?response_type=token"
-                "&client_id=c473ca268cd749d3a8371351a8f2bcbd. "
-                "Used to push state callbacks to Yandex (future feature; "
-                "stored encrypted)."
-            ),
-            help_link=(
-                "https://oauth.yandex.ru/authorize?response_type=token"
-                "&client_id=c473ca268cd749d3a8371351a8f2bcbd"
-            ),
-            required=False,
-            default_value="",
-            advanced=True,
-            category=CATEGORY_ADVANCED,
-        ),
-        ConfigEntry(
-            key=CONF_DIALOG_WEBHOOK_SECRET,
-            type=ConfigEntryType.SECURE_STRING,
-            label="Webhook URL secret",
-            description=(
-                "Random secret embedded in the webhook URL. The full URL is "
-                f"<external_base_url>{DIALOG_WEBHOOK_BASE_PATH}/<this-secret>. "
-                "Pre-filled with a fresh value; click 'Save' to commit. "
-                "Locked once Yandex has been registered against this secret — "
-                "use 'Regenerate webhook secret' below to rotate."
-                if is_configured
-                else "Random secret embedded in the webhook URL. The full URL is "
-                f"<external_base_url>{DIALOG_WEBHOOK_BASE_PATH}/<this-secret>. "
-                "Pre-filled with a fresh value; click 'Save' to commit."
-            ),
-            required=False,
-            value=default_secret,
-            default_value=default_secret,
-            read_only=is_configured,
-            advanced=True,
-            category=CATEGORY_ADVANCED,
-        ),
-        *(
-            (
-                ConfigEntry(
-                    key=CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
-                    type=ConfigEntryType.ACTION,
-                    label="Regenerate webhook secret",
-                    description=(
-                        "Generates a fresh secret + resets the auto-create "
-                        "state. The current Yandex skill registration becomes "
-                        "stale — you'll need to re-run 'Sign in' to register "
-                        "the new webhook URL. Cached Passport login is kept."
-                    ),
-                    action=CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
-                    action_label="Regenerate (forces re-create)",
-                    required=False,
-                    default_value="",
-                    advanced=True,
-                    category=CATEGORY_ADVANCED,
-                ),
-            )
-            if is_configured
-            else ()
-        ),
-        *diagnostics_entries,
-        *hidden_state_entries,
-    )
+

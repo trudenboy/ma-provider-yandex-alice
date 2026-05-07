@@ -70,11 +70,16 @@ class TestDefaultForm:
     """No action: form has both auto-create button and (conditionally) rename."""
 
     @pytest.mark.asyncio
-    async def test_no_action_renders_auto_create_button(self) -> None:
-        """Auto-create ACTION entry is always present."""
+    async def test_no_action_renders_sign_in_button(self) -> None:
+        """When no x_token cached → Authorization block shows Sign in button."""
+        from music_assistant.providers.yandex_alice.constants import CONF_ACTION_SIGN_IN
+
         entries = await get_config_entries(_make_mass(), values={})
         keys = _entries_by_key(entries)
-        assert CONF_ACTION_AUTO_CREATE_DIALOG in keys
+        # Sign in is the primary CTA in the Auth block; Create skill
+        # appears only after auth (or when skill_id is set manually).
+        assert CONF_ACTION_SIGN_IN in keys
+        assert CONF_ACTION_AUTO_CREATE_DIALOG not in keys
 
     @pytest.mark.asyncio
     async def test_rename_hidden_without_skill_id_or_token(self) -> None:
@@ -83,21 +88,8 @@ class TestDefaultForm:
         keys = _entries_by_key(entries)
         assert CONF_ACTION_RENAME_DIALOG_SKILL not in keys
 
-    @pytest.mark.asyncio
-    async def test_rename_visible_when_skill_id_and_token_present(self) -> None:
-        """Both skill_id and cached x_token populate the form → rename shows up."""
-        artifacts = SkillCreationArtifacts(
-            state=SkillCreationState.DONE,
-            skill_id="sk-1",
-            last_known_name="My Skill",
-        )
-        values: dict[str, Any] = {
-            CONF_AUTH_X_TOKEN: "tok",
-            CONF_DIALOG_AUTO_CREATE_ARTIFACTS: dump_artifacts(artifacts),
-        }
-        entries = await get_config_entries(_make_mass(), values=values)
-        keys = _entries_by_key(entries)
-        assert CONF_ACTION_RENAME_DIALOG_SKILL in keys
+    # v1.2.0 Phase F: rename / drift-cluster removed — Edit skill in
+    # Step 3 covers the same use case with a richer set of fields.
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +433,15 @@ class TestDeriveStageRespectsCachedToken:
     """
 
     @pytest.mark.asyncio
-    async def test_intermediate_state_without_token_renders_create_label(self) -> None:
-        """artifacts=APP_CREATED + no x_token → auto-create button says 'Create skill'."""
+    async def test_intermediate_state_without_token_shows_sign_in(self) -> None:
+        """artifacts=APP_CREATED + no x_token → Auth block shows Sign in.
+
+        Skill block ALSO renders because skill_id is known (manual
+        backup-restore path), but the primary CTA stays the Sign in
+        button until auth is resolved.
+        """
+        from music_assistant.providers.yandex_alice.constants import CONF_ACTION_SIGN_IN
+
         artifacts = SkillCreationArtifacts(
             state=SkillCreationState.APP_CREATED,
             skill_id="sk-partial",
@@ -453,9 +452,8 @@ class TestDeriveStageRespectsCachedToken:
         }
         entries = await get_config_entries(_make_mass(), values=values)
         keys = _entries_by_key(entries)
-        action_entry = keys[CONF_ACTION_AUTO_CREATE_DIALOG]
-        # v1.2.0 #19: button label is forward-looking ("what will happen")
-        assert action_entry.action_label == "Sign in to Yandex Passport"
+        assert CONF_ACTION_SIGN_IN in keys
+        assert keys[CONF_ACTION_SIGN_IN].action_label == "Sign in to Yandex Passport"
 
     @pytest.mark.asyncio
     async def test_intermediate_state_with_token_renders_resume_label(self) -> None:

@@ -31,7 +31,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from aiohttp import web
-from music_assistant_models.enums import EventType
 from music_assistant_models.errors import LoginFailed
 from ya_passport_auth import PassportClient
 from ya_passport_auth.exceptions import (
@@ -59,7 +58,6 @@ __all__ = [
     "build_device_code_page_url",
     "perform_device_auth",
     "register_device_code_route",
-    "signal_auth_session_url",
     "unregister_device_code_route",
 ]
 
@@ -319,26 +317,6 @@ def unregister_device_code_route(mass: MusicAssistant, *, session_id: str) -> No
             webserver.unregister_dynamic_route(path, "GET")
 
 
-def signal_auth_session_url(mass: MusicAssistant, session_id: str, page_url: str) -> None:
-    """Best-effort attempt to open the device-code page as a popup.
-
-    MA's frontend listens for the ``AUTH_SESSION`` event and opens
-    the given URL in a popup window. The dispatcher only fires this
-    on a fresh DEVICE_FLOW transition — refreshing the form does not
-    re-fire it (the user can click the inline page-URL in the LABEL
-    instead).
-    """
-    if not page_url or not session_id:
-        return
-    signal_event = getattr(mass, "signal_event", None)
-    if signal_event is None:
-        return
-    try:
-        signal_event(EventType.AUTH_SESSION, session_id, page_url)
-    except Exception as exc:
-        _LOGGER.debug("auth_page: signal_event failed: %r", exc)
-
-
 # ---------------------------------------------------------------------------
 # Blocking Device Flow — single-action sign-in
 # ---------------------------------------------------------------------------
@@ -349,8 +327,13 @@ async def perform_device_auth(
     session_id: str,
     *,
     skill_name: str = "Music Assistant",
-) -> str:
-    """Run a complete Yandex Passport Device Flow and return the x_token.
+) -> tuple[str, str]:
+    """Run a complete Yandex Passport Device Flow.
+
+    Returns ``(x_token, display_login)`` — the long-lived auth token
+    plus the user-visible Yandex login (used in the "Authorized as
+    <name>" banner). ``display_login`` is ``""`` when Yandex didn't
+    return one.
 
     Blocks for the lifetime of the user's confirmation step (up to
     ~10 min). Hosts an HTML landing page at
@@ -420,8 +403,13 @@ async def perform_device_auth(
                 unregister_device_code_route(mass, session_id=session_id)
 
             x_token = creds.x_token.get_secret()
-            _LOGGER.debug("Device flow complete, captured x_token (len=%d)", len(x_token))
-            return x_token
+            display_login = (creds.display_login or "").strip()
+            _LOGGER.debug(
+                "Device flow complete, captured x_token (len=%d) for %r",
+                len(x_token),
+                display_login or "<unknown>",
+            )
+            return x_token, display_login
 
     except DeviceCodeTimeoutError as err:
         raise LoginFailed(

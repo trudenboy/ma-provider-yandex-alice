@@ -27,6 +27,10 @@ CONF_EXPOSED_PLAYERS = "exposed_players"
 # to re-confirm the device code every time. Long-lived (months);
 # automatically refreshed on use. Cleared if Yandex returns 401 on refresh.
 CONF_AUTH_X_TOKEN = "auth_x_token"
+# Display name of the signed-in Yandex account (login or display name).
+# Surfaced as a "Authorized as <name>" banner once auth is complete; not
+# used for any API call.
+CONF_AUTH_USER_NAME = "auth_user_name"
 
 # Dialog skill (Yandex Dialogs custom skill — voice playback)
 CONF_DIALOG_SKILL_NAME = "dialog_skill_name"
@@ -34,16 +38,17 @@ CONF_DIALOG_SKILL_ID = "dialog_skill_id"
 CONF_DIALOG_SKILL_TOKEN = "dialog_skill_token"
 CONF_DIALOG_WEBHOOK_SECRET = "dialog_webhook_secret"
 CONF_DIALOG_AUTO_CREATE_ARTIFACTS = "dialog_auto_create_artifacts"
-CONF_DIALOG_AUTO_CREATE_SESSION_ID = "dialog_auto_create_session_id"
-# Persisted DeviceCodeSession (JSON) so the auto-create button can advance
-# the Device Flow state machine across multiple clicks. Cleared after a
-# successful poll, on expiry, or on Cancel.
-CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION = "dialog_auto_create_device_session"
 
 # ---------------------------------------------------------------------------
 # Config actions (config-flow buttons)
 # ---------------------------------------------------------------------------
 CONF_ACTION_AUTO_CREATE_DIALOG = "auto_create_dialog_skill"
+# v1.2.0 UX revamp — split sign-in / create-skill / clear-auth /
+# delete-skill into four explicit user-facing actions instead of
+# overloading one button.
+CONF_ACTION_SIGN_IN = "sign_in"
+CONF_ACTION_CLEAR_AUTH = "clear_auth"
+CONF_ACTION_DELETE_SKILL = "delete_skill"
 CONF_ACTION_RENAME_DIALOG_SKILL = "rename_dialog_skill"
 # Cancel an in-flight Device Flow / drop partial artifacts. Visible only when
 # DEVICE_FLOW_STARTED or FAILED. Cached x_token is preserved across cancel.
@@ -63,6 +68,10 @@ CONF_ACTION_REVERT_SKILL_NAME = "revert_skill_name"
 # skill_id and continue the pipeline (re-deploys with our backend URL).
 CONF_ACTION_RECREATE_DUPLICATE = "recreate_duplicate"
 CONF_ACTION_ADOPT_EXISTING = "adopt_existing"
+# Step 3 identity card: open the skill in the Yandex Dialogs dev console
+# via the AuthenticationHelper popup channel (signal_event), bypassing
+# `help_link` which only renders as a tiny inline `?` icon.
+CONF_ACTION_OPEN_DEV_CONSOLE = "open_dev_console"
 # Hidden persistence: skill_id of the duplicate found by the pre-check
 # during the previous click. When non-empty, the form renders the
 # Recreate / Adopt resolution UI instead of the regular Create button.
@@ -77,8 +86,14 @@ CONF_ACTION_UPDATE_SKILL = "update_skill"
 CONF_ACTION_CANCEL_EDIT = "cancel_edit"
 
 # Voice + activation phrases editable in edit mode (otherwise auto-derived).
+# Yandex Dialogs allows up to **three** alternative activation phrases
+# in addition to the skill name itself (which is the first phrase).
+# Each must be at least 2 words just like the skill name; empty slots
+# are skipped when assembling the payload sent to Yandex.
 CONF_DIALOG_SKILL_VOICE = "dialog_skill_voice"
-CONF_DIALOG_ACTIVATION_PHRASES = "dialog_activation_phrases"
+CONF_DIALOG_ACTIVATION_PHRASE_2 = "dialog_activation_phrase_2"
+CONF_DIALOG_ACTIVATION_PHRASE_3 = "dialog_activation_phrase_3"
+CONF_DIALOG_ACTIVATION_PHRASE_4 = "dialog_activation_phrase_4"
 
 # Toggle: split-personality between MA "Instance name" (internal) and Yandex
 # "Skill name" (user-facing voice trigger). Default merged — both come from
@@ -108,8 +123,14 @@ DIALOG_VOICE_DEFAULT = "good_oksana"
 # ---------------------------------------------------------------------------
 # Form categories (progressive disclosure)
 # ---------------------------------------------------------------------------
-CATEGORY_SETUP = "setup"
-CATEGORY_VOICE = "voice_control"
+CATEGORY_AUTHORIZATION = "Authorization"
+CATEGORY_SKILL = "Skill"
+# Frontend renders ``settings.category.{slug}`` and falls back to the
+# raw slug when no translation exists — using TitleCase slugs gives
+# us readable section headers ("Authorization" / "Skill" / "Settings")
+# without shipping i18n. Avoid the bare slug ``"settings"`` because
+# the frontend reserves that for the top-level Settings page.
+CATEGORY_SETTINGS = "Settings"
 CATEGORY_ADVANCED = "advanced"
 
 # ---------------------------------------------------------------------------

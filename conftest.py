@@ -147,6 +147,13 @@ class _MassEvent:
 _ensure_module("music_assistant_models.event", {"MassEvent": _MassEvent})
 
 
+# music_assistant_models.constants
+_ensure_module(
+    "music_assistant_models.constants",
+    {"SECURE_STRING_SUBSTITUTE": "this_value_is_encrypted"},
+)
+
+
 # music_assistant_models.errors
 class _LoginFailed(Exception):
     """Stub of music_assistant_models.errors.LoginFailed."""
@@ -156,11 +163,16 @@ class _ResourceTemporarilyUnavailable(Exception):
     """Stub of music_assistant_models.errors.ResourceTemporarilyUnavailable."""
 
 
+class _InvalidDataError(Exception):
+    """Stub of music_assistant_models.errors.InvalidDataError."""
+
+
 _ensure_module(
     "music_assistant_models.errors",
     {
         "LoginFailed": _LoginFailed,
         "ResourceTemporarilyUnavailable": _ResourceTemporarilyUnavailable,
+        "InvalidDataError": _InvalidDataError,
     },
 )
 
