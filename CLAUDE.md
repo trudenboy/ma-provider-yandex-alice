@@ -121,7 +121,10 @@ truth for what landed.
   `provider/manifest.json` together.
 - Tests never make live Yandex calls. Mock `aiohttp.ClientSession` per
   the pattern in `tests/test_auto_create.py` if a new test needs HTTP.
-- Webhook handler error handling (PR #3843 review thread): wrap
-  post-validation body in `try / except` so a parse / dispatch error
-  surfaces as a Russian "что-то пошло не так" reply instead of HTTP 500
-  → Alice silence.
+- Webhook handler error handling (PR #3843 review thread): the
+  post-auth dispatch is wrapped in `try / except` (`_handle_webhook` →
+  `_handle_authenticated_request`) so a parse / dispatch error surfaces
+  as a Russian "что-то пошло не так" reply instead of HTTP 500 → Alice
+  silence. Keep this guarantee intact when modifying the handler — any
+  new branch should also satisfy the
+  `test_unexpected_inner_exception_returns_graceful_fallback` test.

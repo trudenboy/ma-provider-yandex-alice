@@ -240,6 +240,33 @@ class TestDialogsWebhookHandler:
         assert call_kwargs["queue_id"] == "p1"
         assert call_kwargs["media"] is track
 
+    async def test_unexpected_inner_exception_returns_graceful_fallback(self) -> None:
+        """An unexpected raise from inner dispatch surfaces as a Russian fallback, not HTTP 500.
+
+        Flagged in the upstream PR review (#3843, @chrisuthe): only the
+        ``request.json()`` parse was guarded; everything afterwards
+        (parsers, search, dispatch) bubbled to aiohttp → HTTP 500 →
+        Alice silence. The handler now wraps the post-auth body in
+        ``try / except`` to keep the user-facing response intact.
+        """
+        # Make `mass.players.all_players` raise — this triggers inside the
+        # play-resolve path so the exception happens DEEP in dispatch,
+        # well past the auth gate and parser pass.
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.players.all_players = MagicMock(side_effect=RuntimeError("boom"))
+        handler = self._make_handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        # Critical: 200 OK with a Russian fallback, NOT HTTP 500.
+        assert resp.status == 200
+        body_out = _response_body(resp)
+        assert "что-то пошло не так" in body_out["response"]["text"].lower()
+        # Session continues so the user can re-issue a command.
+        assert body_out["response"]["end_session"] is False
+
 
 @pytest.mark.asyncio
 class TestSuggestionButtons:

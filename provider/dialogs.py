@@ -406,7 +406,7 @@ class DialogsWebhookHandler:
     # Webhook entry point
     # -------------------------------------------------------------------
 
-    async def _handle_webhook(self, request: web.Request) -> web.Response:  # noqa: PLR0915
+    async def _handle_webhook(self, request: web.Request) -> web.Response:
         # Path secret already enforced by the route URL — getting here means
         # the secret matches. Still constant-time-compare it via the captured
         # path arg in case aiohttp routing ever changes.
@@ -462,6 +462,51 @@ class DialogsWebhookHandler:
         # that resolve into a player action. Health signal only.
         self._authenticated_call_count += 1
 
+        # Wrap post-auth dispatch so any unexpected exception (parser,
+        # search, MA dispatch, response builder) surfaces as a graceful
+        # Russian fallback instead of an aiohttp HTTP 500 → Alice silence.
+        # Logs the original exception for the operator to debug from
+        # `$HOME/.musicassistant/musicassistant.log`. Flagged in the
+        # upstream PR review (#3843, @chrisuthe) as a regression risk.
+        try:
+            return await self._handle_authenticated_request(
+                body=body, session=session, req=req, has_screen=has_screen
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._logger.exception(
+                "Unhandled error in dialog webhook handler — "
+                "responding with generic fallback (session_id=%s)",
+                session.get("session_id", ""),
+            )
+            text = "Что-то пошло не так. Попробуй ещё раз."
+            return self._yandex_response(
+                incoming_session=session,
+                text=text,
+                tts=_tts_for(text),
+                end_session=False,
+            )
+
+    async def _handle_authenticated_request(  # noqa: PLR0915
+        self,
+        *,
+        body: dict[str, Any],
+        session: dict[str, Any],
+        req: dict[str, Any],
+        has_screen: bool,
+    ) -> web.Response:
+        """Dispatch the request body once authentication has cleared.
+
+        Wrapped in ``try / except`` by the caller so any unexpected raise
+        from a parser, the resolver, or MA dispatch lands as a graceful
+        fallback response rather than HTTP 500. Returns ``web.Response``.
+
+        :param body: Parsed JSON envelope.
+        :param session: ``body["session"]`` already coerced to dict.
+        :param req: ``body["request"]`` already coerced to dict.
+        :param has_screen: Result of :func:`_has_screen` on the request.
+        """
         # State buckets. Three-tier read priority:
         #   1. ``state.session``  — per-conversation, set by us last turn.
         #   2. ``state.application`` — per-device, mirrored fallback.
