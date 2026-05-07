@@ -52,6 +52,7 @@ from .constants import (
     CONF_ACTION_DELETE_SKILL,
     CONF_ACTION_EDIT_SKILL,
     CONF_ACTION_RECREATE_DUPLICATE,
+    CONF_ACTION_REFRESH_STATUS,
     CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
     CONF_ACTION_SIGN_IN,
     CONF_ACTION_TEST_WEBHOOK,
@@ -74,6 +75,44 @@ from .constants import (
     DIALOG_WEBHOOK_BASE_PATH,
 )
 from .dialog_skill_meta import validate_activation_phrase, validate_skill_name
+from .publication_status import (
+    STATUS_DRAFT,
+    STATUS_IN_MODERATION,
+    STATUS_ON_AIR,
+    STATUS_REJECTED,
+)
+
+
+def _publication_status_banner(status: str | None) -> str:
+    """Map a classified publication status to a Step 3 banner string.
+
+    Falls back to the legacy "moderation queue" copy when status is
+    unknown / not yet fetched — better than showing a misleading
+    state to the user.
+    """
+    if status == STATUS_ON_AIR:
+        return (
+            "✓ Yandex moderation passed — your skill is on air. "
+            "Try saying «Алиса, попроси … включи джаз» to your Yandex Station."
+        )
+    if status == STATUS_IN_MODERATION:
+        return (
+            "⏳ Yandex moderation in progress (typically 5-15 min). "
+            "Click Refresh status below to re-check."
+        )
+    if status == STATUS_REJECTED:
+        return (
+            "✗ Yandex moderation rejected the latest deploy. "
+            "Open the dev console to see the rejection reason and edit the "
+            "skill, then click Update skill to re-submit."
+        )
+    if status == STATUS_DRAFT:
+        return (
+            "Skill is registered but has never been published. "
+            "Click Update skill (or re-deploy via Recreate) to submit it "
+            "to Yandex moderation."
+        )
+    return "⏳ Yandex moderation queue: 5-15 min. Click Refresh status to re-check."
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -463,8 +502,9 @@ def _skill_registered_subblock(
     activation_phrase_4: str,
     voice: str,
     update_message: str | None,
+    publication_status: str | None,
 ) -> tuple[ConfigEntry, ...]:
-    """DONE state: identity card + Edit / Update / Delete."""
+    """DONE state: identity card + status banner + Edit / Refresh / Delete."""
     name = artifacts.last_known_name or skill_name or "Music Assistant"
     skill_id = artifacts.skill_id or ""
     dev_console_url = (
@@ -476,6 +516,11 @@ def _skill_registered_subblock(
             key="label_skill_registered",
             type=ConfigEntryType.LABEL,
             label=f"✓ Skill «{name}» is registered. Skill ID: {skill_id}",
+        ),
+        ConfigEntry(
+            key="label_skill_publication_status",
+            type=ConfigEntryType.LABEL,
+            label=_publication_status_banner(publication_status),
         ),
     ]
     if dev_console_url:
@@ -510,6 +555,22 @@ def _skill_registered_subblock(
                 ),
                 action=CONF_ACTION_EDIT_SKILL,
                 action_label="Edit skill",
+                required=False,
+                default_value="",
+            )
+        )
+        entries.append(
+            ConfigEntry(
+                key=CONF_ACTION_REFRESH_STATUS,
+                type=ConfigEntryType.ACTION,
+                label="Refresh publication status",
+                description=(
+                    "Re-fetches the skill's status from Yandex Dialogs (one "
+                    "HTTP call). Useful while moderation is in progress to "
+                    "see when the skill flips to on-air."
+                ),
+                action=CONF_ACTION_REFRESH_STATUS,
+                action_label="Refresh status",
                 required=False,
                 default_value="",
             )
@@ -631,16 +692,21 @@ def _skill_advanced_subblock(  # noqa: PLR0913
     voice: str,
     suppress_phrase_voice_mirror: bool,
     suppress_skill_name_mirror: bool,
+    suppress_external_base_url_mirror: bool,
     skill_name: str,
+    external_base_url: str,
     diagnostics: tuple[ConfigEntry, ...],
 ) -> tuple[ConfigEntry, ...]:
     """Skill-related Advanced fields (visible behind ``Show advanced`` toggle).
 
-    ``suppress_phrase_voice_mirror`` is True while the user is in Step
-    3 *edit mode* — the same keys are already rendered visible in
-    that mode and re-rendering them as hidden mirrors would create a
-    duplicate-key collision. ``suppress_skill_name_mirror`` mirrors
-    the same logic for skill_name (visible in pre-DONE / edit modes).
+    The various ``suppress_*_mirror`` flags avoid duplicate-key
+    collisions: when a key is already rendered *visible* by
+    ``_skill_create_subblock`` / ``_skill_registered_subblock`` in
+    edit mode, it must NOT also appear as a hidden Advanced mirror.
+    The dispatcher passes ``True`` for whichever keys are visible in
+    the current state and ``False`` for the rest; the latter need a
+    mirror so their values still round-trip on form Save (FE only
+    persists visible field values).
     """
     entries: list[ConfigEntry] = []
     if not suppress_skill_name_mirror:
@@ -652,6 +718,22 @@ def _skill_advanced_subblock(  # noqa: PLR0913
                 description="The skill's display name in Yandex Dialogs.",
                 required=False,
                 value=skill_name,
+                default_value="",
+                advanced=True,
+            )
+        )
+    if not suppress_external_base_url_mirror:
+        entries.append(
+            ConfigEntry(
+                key=CONF_EXTERNAL_BASE_URL,
+                type=ConfigEntryType.STRING,
+                label="External base URL (HTTPS)",
+                description=(
+                    "Public HTTPS URL Yandex calls for webhooks. "
+                    "Editable here even after the skill is registered."
+                ),
+                required=False,
+                value=external_base_url,
                 default_value="",
                 advanced=True,
             )
@@ -785,6 +867,7 @@ def _skill_block(  # noqa: PLR0913
     duplicate_skill_id: str | None,
     duplicate_skill_name: str | None,
     action_outcome: AutoCreateOutcome | None,
+    publication_status: str | None,
     diagnostics: tuple[ConfigEntry, ...],
 ) -> tuple[ConfigEntry, ...]:
     """Skill section visible when authed OR a manual skill_id is set."""
@@ -813,6 +896,7 @@ def _skill_block(  # noqa: PLR0913
         stage = LocalAutoCreateStage.IDLE
 
     visible_entries: tuple[ConfigEntry, ...]
+    suppress_external_base_url_mirror = False
     if duplicate_pending:
         visible_entries = _skill_duplicate_subblock(
             duplicate_skill_name=duplicate_skill_name or "",
@@ -831,9 +915,12 @@ def _skill_block(  # noqa: PLR0913
             activation_phrase_4=activation_phrase_4,
             voice=voice,
             update_message=update_message,
+            publication_status=publication_status,
         )
         suppress_phrase_voice_mirror = edit_mode
         suppress_skill_name_mirror = edit_mode
+        # external_base_url is NOT visible in DONE / edit-mode → keep
+        # the Advanced mirror so its value still round-trips on Save.
     else:
         visible_entries = _skill_create_subblock(
             artifacts=artifacts,
@@ -846,6 +933,7 @@ def _skill_block(  # noqa: PLR0913
         )
         suppress_phrase_voice_mirror = False
         suppress_skill_name_mirror = True  # rendered visible above
+        suppress_external_base_url_mirror = True  # rendered visible above
 
     advanced_entries = _skill_advanced_subblock(
         is_configured=is_done and bool(artifacts.skill_id),
@@ -858,7 +946,9 @@ def _skill_block(  # noqa: PLR0913
         voice=voice,
         suppress_phrase_voice_mirror=suppress_phrase_voice_mirror,
         suppress_skill_name_mirror=suppress_skill_name_mirror,
+        suppress_external_base_url_mirror=suppress_external_base_url_mirror,
         skill_name=skill_name,
+        external_base_url=external_base_url,
         diagnostics=diagnostics,
     )
     return (*visible_entries, *advanced_entries)
@@ -969,6 +1059,7 @@ def build_form_entries(  # noqa: PLR0913
     player_options: list[ConfigValueOption],
     instance_name: str,
     use_different_instance_name: bool,
+    publication_status: str | None,
     diagnostics: tuple[ConfigEntry, ...],
     hidden_state: tuple[ConfigEntry, ...],
 ) -> tuple[ConfigEntry, ...]:
@@ -1001,6 +1092,7 @@ def build_form_entries(  # noqa: PLR0913
             duplicate_skill_id=duplicate_skill_id,
             duplicate_skill_name=duplicate_skill_name,
             action_outcome=action_outcome,
+            publication_status=publication_status,
             diagnostics=diagnostics,
         ),
         CATEGORY_SKILL,

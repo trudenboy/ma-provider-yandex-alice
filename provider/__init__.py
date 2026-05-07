@@ -51,6 +51,7 @@ from .constants import (
     CONF_ACTION_DELETE_SKILL,
     CONF_ACTION_EDIT_SKILL,
     CONF_ACTION_RECREATE_DUPLICATE,
+    CONF_ACTION_REFRESH_STATUS,
     CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
     CONF_ACTION_RENAME_DIALOG_SKILL,
     CONF_ACTION_REVERT_SKILL_NAME,
@@ -63,6 +64,7 @@ from .constants import (
     CONF_DIALOG_ACTIVATION_PHRASE_3,
     CONF_DIALOG_ACTIVATION_PHRASE_4,
     CONF_DIALOG_AUTO_CREATE_ARTIFACTS,
+    CONF_DIALOG_PUBLICATION_STATUS,
     CONF_DIALOG_SKILL_ID,
     CONF_DIALOG_SKILL_NAME,
     CONF_DIALOG_SKILL_TOKEN,
@@ -84,6 +86,7 @@ from .dialog_skill_meta import (
     build_structured_examples,
 )
 from .plugin import YandexAlicePlugin
+from .publication_status import fetch_skill_publication_status
 from .setup_view import build_form_entries
 from .url_helpers import (
     is_public_https_url,
@@ -545,6 +548,9 @@ async def get_config_entries(  # noqa: PLR0915
     skill_token_value = _resolve_secure_string_from(
         saved_provider, values, CONF_DIALOG_SKILL_TOKEN
     )
+    # Carried across renders unless a deploy-related action below
+    # overrides it via a snapshot fetch (or DELETE_SKILL clears it).
+    publication_status = _resolve_saved_value(values, CONF_DIALOG_PUBLICATION_STATUS)
 
     # Skill name priority: explicit dialog skill name → instance name → default.
     skill_name = (
@@ -652,6 +658,7 @@ async def get_config_entries(  # noqa: PLR0915
                 update_message = "Skill deleted from Yandex Dialogs."
                 artifacts = SkillCreationArtifacts()
                 values[CONF_DIALOG_SKILL_ID] = ""
+                publication_status = ""
             except Exception as exc:
                 _LOGGER.exception("yandex-alice: delete_skill failed")
                 update_message = f"Failed to delete skill: {exc!r}"
@@ -827,6 +834,31 @@ async def get_config_entries(  # noqa: PLR0915
         else:
             update_message = "Nothing to revert — no last-known name on record yet."
 
+    elif action == CONF_ACTION_REFRESH_STATUS:
+        # Manual snapshot fetch — single HTTP call, updates the cached
+        # publication_status field. Used to track Yandex moderation
+        # transitions (in_moderation → on_air) without re-deploying.
+        target_skill_id = (
+            artifacts.skill_id
+            or str(values.get(CONF_DIALOG_SKILL_ID) or "").strip()
+        )
+        if not target_skill_id or not cached_x_token:
+            update_message = (
+                "Refresh status is only available after a skill has been registered."
+            )
+        else:
+            fetched = await fetch_skill_publication_status(
+                cached_x_token, target_skill_id
+            )
+            if fetched is None:
+                update_message = (
+                    "Could not fetch publication status — Yandex Dialogs is "
+                    "not reachable, or the skill no longer exists in your account."
+                )
+            else:
+                publication_status = fetched
+                update_message = "Publication status refreshed."
+
     # ---- Reflect outcome into values so the next form save persists state ----
     if action_outcome is not None:
         artifacts = action_outcome.artifacts
@@ -852,6 +884,33 @@ async def get_config_entries(  # noqa: PLR0915
     values[CONF_AUTH_X_TOKEN] = cached_x_token
     if artifacts.state == SkillCreationState.DONE and artifacts.skill_id:
         values[CONF_DIALOG_SKILL_ID] = artifacts.skill_id
+
+    # ---- Post-deploy publication-status snapshot ----
+    # One HTTP call right after a deploy-related action so the Step 3
+    # banner reflects Yandex's view as of the moment the user clicked.
+    # CONF_ACTION_REFRESH_STATUS already fetched inside its handler;
+    # other actions either don't change publication state (sign-in,
+    # cancel, edit-mode toggles) or run their own snapshot inline.
+    deploy_actions_for_status_fetch = (
+        CONF_ACTION_AUTO_CREATE_DIALOG,
+        CONF_ACTION_RECREATE_DUPLICATE,
+        CONF_ACTION_ADOPT_EXISTING,
+        CONF_ACTION_UPDATE_SKILL,
+        CONF_ACTION_RENAME_DIALOG_SKILL,
+    )
+    if (
+        action in deploy_actions_for_status_fetch
+        and artifacts.state == SkillCreationState.DONE
+        and artifacts.skill_id
+        and cached_x_token
+    ):
+        fetched_status = await fetch_skill_publication_status(
+            cached_x_token, artifacts.skill_id
+        )
+        if fetched_status is not None:
+            publication_status = fetched_status
+
+    values[CONF_DIALOG_PUBLICATION_STATUS] = publication_status
 
     # ---- Player options for voice exposure ----
     player_options = await _list_player_options(mass)
@@ -979,6 +1038,18 @@ async def get_config_entries(  # noqa: PLR0915
             value=edit_mode,
             hidden=True,
         ),
+        ConfigEntry(
+            key=CONF_DIALOG_PUBLICATION_STATUS,
+            type=ConfigEntryType.STRING,
+            label="Yandex skill publication status (cached)",
+            description=(
+                "Last known on_air / in_moderation / draft / rejected /"
+                " unknown classification fetched from Yandex snapshot."
+            ),
+            required=False,
+            value=publication_status,
+            hidden=True,
+        ),
     )
 
     diagnostics_entries = _build_diagnostics_entries(mass, instance_id)
@@ -1008,6 +1079,7 @@ async def get_config_entries(  # noqa: PLR0915
         player_options=player_options,
         instance_name=instance_name,
         use_different_instance_name=use_different_instance_name,
+        publication_status=publication_status or None,
         diagnostics=diagnostics_entries,
         hidden_state=hidden_state_entries,
     )

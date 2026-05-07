@@ -38,6 +38,12 @@ CONF_DIALOG_SKILL_ID = "dialog_skill_id"
 CONF_DIALOG_SKILL_TOKEN = "dialog_skill_token"
 CONF_DIALOG_WEBHOOK_SECRET = "dialog_webhook_secret"
 CONF_DIALOG_AUTO_CREATE_ARTIFACTS = "dialog_auto_create_artifacts"
+# v1.2.0 — Yandex skill publication status, classified into one of:
+# ``on_air`` / ``in_moderation`` / ``draft`` / ``rejected`` / ``unknown``.
+# Refreshed once after every successful Create / Update / Adopt /
+# Recreate / Refresh-status action. Read by Step 3 to render the
+# moderation banner without making an HTTP call on every render.
+CONF_DIALOG_PUBLICATION_STATUS = "dialog_publication_status"
 
 # ---------------------------------------------------------------------------
 # Config actions (config-flow buttons)
@@ -49,6 +55,10 @@ CONF_ACTION_AUTO_CREATE_DIALOG = "auto_create_dialog_skill"
 CONF_ACTION_SIGN_IN = "sign_in"
 CONF_ACTION_CLEAR_AUTH = "clear_auth"
 CONF_ACTION_DELETE_SKILL = "delete_skill"
+# v1.2.0 — manual "Refresh status" trigger in Step 3. The dispatcher
+# fetches the live publication status from Yandex Dialogs snapshot
+# and updates the cached value used by the Step 3 status banner.
+CONF_ACTION_REFRESH_STATUS = "refresh_status"
 CONF_ACTION_RENAME_DIALOG_SKILL = "rename_dialog_skill"
 # Cancel an in-flight Device Flow / drop partial artifacts. Visible only when
 # DEVICE_FLOW_STARTED or FAILED. Cached x_token is preserved across cancel.
