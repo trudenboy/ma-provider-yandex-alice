@@ -47,7 +47,9 @@ filterwarnings = [
 
 [tool.codespell]
 skip = "*.min.js,*.svg,docs-site/package-lock.json"
-ignore-words-list = "hass,"
+# `sting` — the artist (Стинг), not a typo of "string". Lives in
+# tts_dictionary.py.
+ignore-words-list = "hass,sting"
 
 [tool.mypy]
 python_version = "3.12"
