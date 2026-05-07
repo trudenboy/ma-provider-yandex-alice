@@ -124,9 +124,7 @@ class TestPreCheckDuplicate:
             raise RuntimeError("network blip")
             yield  # type: ignore[unreachable]  # pragma: no cover
 
-        monkeypatch.setattr(
-            auto_create, "cached_authenticated_session", _raising_factory
-        )
+        monkeypatch.setattr(auto_create, "cached_authenticated_session", _raising_factory)
         result = await auto_create._pre_check_duplicate("tok", "Music Assistant")
         assert result is None
 
