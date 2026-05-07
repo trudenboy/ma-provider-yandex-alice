@@ -50,6 +50,27 @@ CONF_ACTION_RENAME_DIALOG_SKILL = "rename_dialog_skill"
 # Cancel an in-flight Device Flow / drop partial artifacts. Visible only when
 # DEVICE_FLOW_STARTED or FAILED. Cached x_token is preserved across cancel.
 CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW = "cancel_dialog_skill_flow"
+# Test webhook reachability — outgoing POST to verify DNS + TLS + reverse proxy.
+CONF_ACTION_TEST_WEBHOOK = "test_webhook_reachability"
+# Regenerate the webhook URL secret. Drops the existing skill registration in
+# Yandex (delete_skill) so the next auto-create starts fresh — guards against
+# the user editing the webhook secret field by hand and orphaning the route.
+CONF_ACTION_REGENERATE_WEBHOOK_SECRET = "regenerate_webhook_secret"
+# Revert Skill name back to artifacts.last_known_name (drift undo).
+CONF_ACTION_REVERT_SKILL_NAME = "revert_skill_name"
+
+# Toggle: split-personality between MA "Instance name" (internal) and Yandex
+# "Skill name" (user-facing voice trigger). Default merged — both come from
+# CONF_DIALOG_SKILL_NAME. Power users can flip this to expose a separate
+# CONF_INSTANCE_NAME field.
+CONF_USE_DIFFERENT_INSTANCE_NAME = "use_different_instance_name"
+
+# ---------------------------------------------------------------------------
+# Form categories (progressive disclosure)
+# ---------------------------------------------------------------------------
+CATEGORY_SETUP = "setup"
+CATEGORY_VOICE = "voice_control"
+CATEGORY_ADVANCED = "advanced"
 
 # ---------------------------------------------------------------------------
 # Webhook routing

@@ -243,6 +243,27 @@ class DialogsWebhookHandler:
         self._unregister_callbacks: list[Callable[[], None]] = []
         # In-process state cache; see _STATE_CACHE_TTL_SEC / _MAX.
         self._state_cache: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()
+        # Diagnostics counters surfaced via ``get_diagnostics()`` on the
+        # plugin instance — used by the Advanced section of the config form
+        # to show "N webhooks today, last X seconds ago".
+        self._webhook_call_count: int = 0
+        self._intent_dispatch_count: int = 0
+        self._last_webhook_ts: float | None = None
+
+    @property
+    def webhook_call_count(self) -> int:
+        """Total Yandex webhook invocations this process has handled."""
+        return self._webhook_call_count
+
+    @property
+    def intent_dispatch_count(self) -> int:
+        """Subset of webhook calls that resolved into an MA player action."""
+        return self._intent_dispatch_count
+
+    @property
+    def last_webhook_ts(self) -> float | None:
+        """Wall-clock timestamp of the most recent webhook (or None)."""
+        return self._last_webhook_ts
 
     def _cache_key(self, session: dict[str, Any]) -> str | None:
         """Pick the most stable identifier for the in-process state cache.
@@ -334,6 +355,12 @@ class DialogsWebhookHandler:
         if not secrets.compare_digest(url_secret, self._webhook_secret):
             return web.Response(status=404)
 
+        # Counters: tick on every reachable POST so the Advanced LABEL can
+        # show the user when Yandex last hit us. Intent counter ticks only
+        # when we successfully dispatched a player action — see _dispatch_*.
+        self._webhook_call_count += 1
+        self._last_webhook_ts = time.time()
+
         try:
             body = await request.json()
         except asyncio.CancelledError:
@@ -365,6 +392,10 @@ class DialogsWebhookHandler:
                 self._skill_id,
             )
             return web.Response(status=401)
+
+        # Past the skill_id gate the request is genuine traffic from our
+        # registered Yandex skill — count it as a real intent dispatch.
+        self._intent_dispatch_count += 1
 
         # State buckets. Three-tier read priority:
         #   1. ``state.session``  — per-conversation, set by us last turn.

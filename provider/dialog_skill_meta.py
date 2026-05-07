@@ -9,7 +9,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from .constants import DIALOG_WEBHOOK_BASE_PATH
+from .constants import DIALOG_NAME_MAX_LEN, DIALOG_NAME_MIN_LEN, DIALOG_WEBHOOK_BASE_PATH
+
+
+def validate_skill_name(value: object) -> bool:
+    """Pre-flight check for the Yandex Dialogs skill name field.
+
+    Yandex enforces three constraints when a skill is created:
+
+    1. **At least two whitespace-separated words.** Single-word names are
+       rejected by the dev-console form (Russian: "Название должно содержать
+       минимум два слова"). The auto-create pipeline would surface this only
+       after Device Flow + ``create_app`` round-trip, so we check up front.
+    2. **2 to 64 characters** (after stripping leading/trailing whitespace).
+    3. Globally unique across all Yandex skills — only checkable at
+       ``create_app`` time, not here.
+
+    Returns ``True`` when the value passes 1+2 (uniqueness is server-side).
+    Designed for use as ``ConfigEntry(validate=validate_skill_name)`` —
+    accepts ``object`` because that's the type the MA frontend hands us.
+    """
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if len(stripped.split()) < 2:
+        return False
+    return DIALOG_NAME_MIN_LEN <= len(stripped) <= DIALOG_NAME_MAX_LEN
 
 
 def build_backend_uri(base_url: str, webhook_secret: str) -> str:

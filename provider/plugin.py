@@ -71,6 +71,10 @@ class YandexAlicePlugin(PluginProvider):
     # MA may call into the provider for diagnostics; keep a noop attribute hook.
     def get_diagnostics(self) -> dict[str, Any]:
         """Expose a tiny status snapshot for MA diagnostics."""
+        handler = self._dialogs_handler
+        webhook_calls_total = handler.webhook_call_count if handler else 0
+        intent_calls_total = handler.intent_dispatch_count if handler else 0
+        last_webhook_ts = handler.last_webhook_ts if handler else None
         return {
             "instance_name": self._instance_name,
             "dialog_skill_enabled": self._dialog_skill_enabled,
@@ -79,5 +83,8 @@ class YandexAlicePlugin(PluginProvider):
             "exposed_player_count": (
                 len(self._exposed_player_ids) if self._exposed_player_ids else 0
             ),
-            "handler_active": self._dialogs_handler is not None,
+            "handler_active": handler is not None,
+            "webhook_calls_total": webhook_calls_total,
+            "intent_calls_total": intent_calls_total,
+            "last_webhook_ts": last_webhook_ts,
         }

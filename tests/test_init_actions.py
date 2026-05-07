@@ -461,7 +461,8 @@ class TestDeriveStageRespectsCachedToken:
         entries = await get_config_entries(_make_mass(), values=values)
         keys = _entries_by_key(entries)
         action_entry = keys[CONF_ACTION_AUTO_CREATE_DIALOG]
-        assert action_entry.action_label == "Create skill"
+        # v1.2.0 #19: button label is forward-looking ("what will happen")
+        assert action_entry.action_label == "Sign in to Yandex Passport"
 
     @pytest.mark.asyncio
     async def test_intermediate_state_with_token_renders_resume_label(self) -> None:
@@ -476,7 +477,8 @@ class TestDeriveStageRespectsCachedToken:
         }
         entries = await get_config_entries(_make_mass(), values=values)
         keys = _entries_by_key(entries)
-        assert keys[CONF_ACTION_AUTO_CREATE_DIALOG].action_label == "Resume"
+        # v1.2.0 #19: PIPELINE_RUNNING button = "Continue setup"
+        assert keys[CONF_ACTION_AUTO_CREATE_DIALOG].action_label == "Continue setup"
 
 
 class TestDeviceFlowStartedHintOnReload:
@@ -501,8 +503,9 @@ class TestDeviceFlowStartedHintOnReload:
         entries = await get_config_entries(_make_mass(), values=values)
         keys = _entries_by_key(entries)
 
-        # Status LABEL is rendered with the code + URL inline.
-        assert "label_auto_create_status" in keys
-        status_label = keys["label_auto_create_status"].label
-        assert "WXYZ-1234" in status_label
-        assert "ya.ru/device" in status_label
+        # v1.2.0 #6+#7: Device Flow LABELs split into multiple entries; the
+        # user_code lands in step2 LABEL, the verification_url in step1.
+        assert "label_auto_create_device_flow_step1" in keys
+        assert "label_auto_create_device_flow_step2" in keys
+        assert "ya.ru/device" in keys["label_auto_create_device_flow_step1"].label
+        assert "WXYZ-1234" in keys["label_auto_create_device_flow_step2"].label
