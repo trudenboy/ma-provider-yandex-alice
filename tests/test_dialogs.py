@@ -240,6 +240,37 @@ class TestDialogsWebhookHandler:
         assert call_kwargs["queue_id"] == "p1"
         assert call_kwargs["media"] is track
 
+    async def test_dangerous_context_log_redacts_command(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Flagged content must NOT leak into DEBUG logs even at operator's request.
+
+        Copilot review on PR #18: the structured "Webhook recv" line was
+        emitting `cmd=...` and `raw=...` *before* the dangerous_context
+        refusal branch, so flagged phrases ended up in
+        $HOME/.musicassistant/musicassistant.log when DEBUG was on.
+        """
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._make_handler(mass)
+        sensitive = "очень плохая фраза которую яндекс пометил"
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": sensitive,
+                "original_utterance": sensitive,
+                "markup": {"dangerous_context": True},
+            },
+        }
+        with caplog.at_level("DEBUG", logger="music_assistant.providers.yandex_alice.dialogs"):
+            await handler._handle_webhook(_build_request(body))
+        # Flagged content must not be present in any log record.
+        for record in caplog.records:
+            assert sensitive not in record.getMessage()
+        # Confirm we DID emit the structured log line (with the redaction marker)
+        # — silent skip would also satisfy the negative assertion above and is
+        # not what we want.
+        assert any("redacted: dangerous_context" in r.getMessage() for r in caplog.records)
+
     async def test_unexpected_inner_exception_returns_graceful_fallback(self) -> None:
         """An unexpected raise from inner dispatch surfaces as a Russian fallback, not HTTP 500.
 

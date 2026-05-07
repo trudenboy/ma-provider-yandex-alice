@@ -313,9 +313,11 @@ def _try_match(
                 n = _yandex_number(entities)
             if n is not None:
                 # Clamp the magnitude so an absurd "прибавь на 999" doesn't
-                # underflow/overflow downstream arithmetic. Sign is applied
-                # to the (clamped) magnitude.
-                magnitude = max(1, min(100, abs(n)))
+                # underflow/overflow downstream arithmetic. ``0`` stays
+                # ``0`` — "прибавь на 0" is a valid (if pointless) no-op
+                # rather than the user's spoken zero being silently
+                # promoted to one.
+                magnitude = max(0, min(100, abs(n)))
                 return ParsedControl(
                     action="volume_relative",
                     value=sign * magnitude,

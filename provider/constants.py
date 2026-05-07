@@ -116,8 +116,9 @@ CONF_USE_DIFFERENT_INSTANCE_NAME = "use_different_instance_name"
 # the user re-says "Алиса, попроси <name>" for the next command. ON keeps
 # `end_session=false` after success so follow-ups skip the activation
 # preamble at the cost of a "skill is listening" indicator on screened
-# surfaces. Explicit "стоп / выключи / спасибо" still ends the session
-# (those phrases parse as the existing `stop` control intent).
+# surfaces. Explicit "стоп / останови / выключи / выключи музыку" still
+# end the session via the existing `stop` control intent (matched by
+# `parse_control` patterns in `dialogs_control.py`).
 CONF_DIALOG_VOICE_CONTINUATION = "dialog_voice_continuation"
 
 # Yandex Dialogs catalog voice options (TTS), passed to draft payload.

@@ -569,16 +569,25 @@ class DialogsWebhookHandler:
         # normalised `command` (Yandex strips punctuation and converts
         # spelled-out numbers; the raw form helps misclassification
         # post-mortems).
-        raw_suffix = (
-            f" raw={original_utterance!r}"
-            if original_utterance and original_utterance != command
-            else ""
-        )
+        # Flagged content (`dangerous_context=true`) is redacted from
+        # both `cmd` and the raw suffix — Yandex flags suicide / hate /
+        # violence phrasings and we don't want to persist any of that
+        # in DEBUG logs even at the operator's request.
+        if dangerous_context:
+            cmd_for_log: str | None = "<redacted: dangerous_context>"
+            raw_suffix = ""
+        else:
+            cmd_for_log = command
+            raw_suffix = (
+                f" raw={original_utterance!r}"
+                if original_utterance and original_utterance != command
+                else ""
+            )
         self._logger.debug(
             "Webhook recv: cmd=%r%s req_type=%s is_new=%s pending=%s "
             "(session=%s app=%s cache=%s) awaiting=%s default_player=%s "
             "dangerous=%s session_id=%s",
-            command,
+            cmd_for_log,
             raw_suffix,
             req.get("type", "SimpleUtterance"),
             is_new,

@@ -289,6 +289,24 @@ class TestParseControlVolumeRelative:
         assert result.action == "volume_set"
         assert result.value == 30
 
+    @pytest.mark.parametrize(
+        ("phrase", "expected_value"),
+        [
+            ("прибавь на 0", 0),
+            ("убавь 0", 0),
+            ("на 0 громче", 0),
+            ("на 0 тише", 0),
+        ],
+    )
+    def test_zero_magnitude_passes_through_as_zero(
+        self, phrase: str, expected_value: int
+    ) -> None:
+        """Zero magnitude is preserved (not promoted to ±1) — Copilot review on PR #18."""
+        result = parse_control(phrase)
+        assert result is not None
+        assert result.action == "volume_relative"
+        assert result.value == expected_value
+
 
 class TestPluralRu:
     """Tests for the Russian quantitative-form picker."""
