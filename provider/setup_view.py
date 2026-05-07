@@ -29,6 +29,8 @@ use TitleCase slugs so the fallback already reads as a proper
 section heading without shipping a translation file.
 """
 
+# ruff: noqa: RUF001, RUF002
+
 from __future__ import annotations
 
 import contextlib
@@ -83,36 +85,57 @@ from .publication_status import (
 )
 
 
-def _publication_status_banner(status: str | None) -> str:
-    """Map a classified publication status to a Step 3 banner string.
+def _publication_status_banner(
+    status: str | None,
+) -> tuple[str, ConfigEntryType]:
+    """Map a classified publication status to a Step 3 banner.
 
-    Falls back to the legacy "moderation queue" copy when status is
-    unknown / not yet fetched — better than showing a misleading
-    state to the user.
+    Returns ``(label_text, entry_type)``. Negative / actionable states
+    use :attr:`ConfigEntryType.ALERT` — the MA frontend renders these
+    as a tonal amber ``v-alert`` to draw the eye. Neutral / success
+    states use :attr:`ConfigEntryType.LABEL` (plain text) so the form
+    doesn't scream at a user whose skill is fine.
+
+    Color emoji prefixes carry the semantic differentiation since
+    ALERT's color is hard-coded amber by the frontend:
+
+    * ✅ on-air (success) — LABEL
+    * ⏳ in-moderation (waiting) — ALERT
+    * ❌ rejected (error) — ALERT
+    * ⚠️ draft (needs user action) — ALERT
+    * ℹ️ unknown / not yet fetched — LABEL
     """
     if status == STATUS_ON_AIR:
         return (
-            "✓ Yandex moderation passed — your skill is on air. "
-            "Try saying «Алиса, попроси … включи джаз» to your Yandex Station."
+            "✅ Yandex moderation passed — your skill is on air. "
+            "Try saying «Алиса, попроси … включи джаз» to your Yandex Station.",
+            ConfigEntryType.LABEL,
         )
     if status == STATUS_IN_MODERATION:
         return (
             "⏳ Yandex moderation in progress (typically 5-15 min). "
-            "Click Refresh status below to re-check."
+            "Click Refresh status below to re-check.",
+            ConfigEntryType.ALERT,
         )
     if status == STATUS_REJECTED:
         return (
-            "✗ Yandex moderation rejected the latest deploy. "
+            "❌ Yandex moderation rejected the latest deploy. "
             "Open the dev console to see the rejection reason and edit the "
-            "skill, then click Update skill to re-submit."
+            "skill, then click Update skill to re-submit.",
+            ConfigEntryType.ALERT,
         )
     if status == STATUS_DRAFT:
         return (
-            "Skill is registered but has never been published. "
+            "⚠️ Skill is registered but has never been published. "
             "Click Update skill (or re-deploy via Recreate) to submit it "
-            "to Yandex moderation."
+            "to Yandex moderation.",
+            ConfigEntryType.ALERT,
         )
-    return "⏳ Yandex moderation queue: 5-15 min. Click Refresh status to re-check."
+    return (
+        "ℹ️ Publication status not yet fetched — click Refresh status "
+        "to query Yandex Dialogs.",
+        ConfigEntryType.LABEL,
+    )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -170,7 +193,7 @@ def _authorization_block(
             ConfigEntry(
                 key="label_auth_status",
                 type=ConfigEntryType.LABEL,
-                label=f"✓ Signed in to Yandex as «{user_name.strip() or 'Yandex account'}».",
+                label=f"✅ Signed in to Yandex as «{user_name.strip() or 'Yandex account'}».",
             ),
             ConfigEntry(
                 key=CONF_ACTION_CLEAR_AUTH,
@@ -193,8 +216,8 @@ def _authorization_block(
         entries.append(
             ConfigEntry(
                 key="label_auth_last_error",
-                type=ConfigEntryType.LABEL,
-                label=f"✗ {last_error}",
+                type=ConfigEntryType.ALERT,
+                label=f"❌ {last_error}",
             )
         )
     entries.append(
@@ -329,8 +352,8 @@ def _skill_create_subblock(
         entries.append(
             ConfigEntry(
                 key="label_skill_failed",
-                type=ConfigEntryType.LABEL,
-                label=f"✗ {err}",
+                type=ConfigEntryType.ALERT,
+                label=f"❌ {err}",
             )
         )
         if external_base_url:
@@ -511,16 +534,17 @@ def _skill_registered_subblock(
         f"https://dialogs.yandex.ru/developer/skills/{skill_id}" if skill_id else ""
     )
 
+    status_text, status_entry_type = _publication_status_banner(publication_status)
     entries: list[ConfigEntry] = [
         ConfigEntry(
             key="label_skill_registered",
             type=ConfigEntryType.LABEL,
-            label=f"✓ Skill «{name}» is registered. Skill ID: {skill_id}",
+            label=f"✅ Skill «{name}» is registered. Skill ID: {skill_id}",
         ),
         ConfigEntry(
             key="label_skill_publication_status",
-            type=ConfigEntryType.LABEL,
-            label=_publication_status_banner(publication_status),
+            type=status_entry_type,
+            label=status_text,
         ),
     ]
     if dev_console_url:

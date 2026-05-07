@@ -63,6 +63,7 @@ class _ConfigEntryType(_StrEnum):
     BOOLEAN = "boolean"
     INTEGER = "integer"
     LABEL = "label"
+    ALERT = "alert"
     ACTION = "action"
 
 

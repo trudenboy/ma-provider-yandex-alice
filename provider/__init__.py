@@ -410,7 +410,7 @@ def _build_identity_card_entries(
         ConfigEntry(
             key="label_identity_card_header",
             type=ConfigEntryType.LABEL,
-            label=f"✓ Configured: «{skill_label}» — Skill ID: {artifacts.skill_id}",
+            label=f"✅ Configured: «{skill_label}» — Skill ID: {artifacts.skill_id}",
         ),
         ConfigEntry(
             key="identity_card_dev_console_url",
@@ -819,7 +819,7 @@ async def get_config_entries(  # noqa: PLR0915
         # Reachability probe — does Yandex's traffic actually land in our
         # handler? Returns ``(ok, message)`` ready for an inline LABEL.
         reachable, msg = await probe_webhook_reachability(external_base_url, webhook_secret)
-        update_message = ("✓ " if reachable else "✗ ") + msg
+        update_message = ("✅ " if reachable else "❌ ") + msg
 
     elif action == CONF_ACTION_REVERT_SKILL_NAME:
         # Drift undo (#13) — copy artifacts.last_known_name back into the
@@ -950,7 +950,7 @@ async def get_config_entries(  # noqa: PLR0915
                 )
     elif not is_public_https_url(user_supplied_base_url):
         base_url_description = (
-            "✗ This URL is not a public HTTPS endpoint — Yandex requires "
+            "❌ This URL is not a public HTTPS endpoint — Yandex requires "
             "https:// and a non-private host. Auto-create will refuse this. "
             f"Got: {user_supplied_base_url!r}"
         )
