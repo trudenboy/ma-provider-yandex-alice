@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-05-07
+
+### Fixed
+
+- **Upstream CI codespell**: the `pyproject.toml` codespell ignore-list
+  added in 1.3.0 only applied locally — `music-assistant/server` uses
+  its own codespell config and re-flagged `sting` (the artist Стинг in
+  `tts_dictionary.py`, not a typo of `string`) on
+  [PR #3843](https://github.com/music-assistant/server/pull/3843)
+  ([run](https://github.com/music-assistant/server/actions/runs/25521399342)).
+  Replaced with an inline `# codespell:ignore sting` directive that
+  works regardless of repo-level config.
+
 ## [1.3.0] — 2026-05-07
 
 Maximum-integration release for Yandex Dialogs platform features (Phases
