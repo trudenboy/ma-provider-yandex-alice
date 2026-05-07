@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-05-07
+
+### Fixed
+
+- `build_backend_uri` (`dialog_skill_meta.py`) and the webhook reachability
+  probe (`webhook_probe.py`) previously only checked for an `https://`
+  prefix. Both now route the URL through `is_public_https_url`, so private
+  IPs, loopback and link-local hosts (e.g. `https://localhost`,
+  `https://192.168.1.10`) are rejected up front with a clear error
+  before auto-create / update touches Yandex or the probe loops back
+  to the same machine. Found by Copilot review on
+  [music-assistant/server#3843](https://github.com/music-assistant/server/pull/3843)
+  ([#1](https://github.com/music-assistant/server/pull/3843#discussion_r3202494295),
+  [#2](https://github.com/music-assistant/server/pull/3843#discussion_r3202494389)).
+
 ## [1.2.1] — 2026-05-07
 
 ### Fixed
