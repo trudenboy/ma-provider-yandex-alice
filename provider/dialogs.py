@@ -272,20 +272,19 @@ class DialogsWebhookHandler:
     ) -> None:
         """Initialize the handler.
 
-        Args:
-            mass: MusicAssistant instance.
-            skill_id: Configured ``CONF_DIALOG_SKILL_ID``; payloads with a
-                different ``session.skill_id`` are rejected.
-            webhook_secret: Random secret embedded in the webhook URL.
-            exposed_player_ids: Optional restriction set; only these players
-                are addressable by voice (passed to the player resolver).
-            voice_continuation: When True, play- and control-success
-                responses keep the conversation open (``end_session=False``)
-                so the user can issue follow-ups without re-saying the
-                activation phrase. Default False preserves today's
-                voice-UX. Stop / pause-with-no-resume utterances still
-                close the session via the existing control path.
-            logger: Optional logger override.
+        :param mass: MusicAssistant instance.
+        :param skill_id: Configured ``CONF_DIALOG_SKILL_ID``; payloads
+            with a different ``session.skill_id`` are rejected.
+        :param webhook_secret: Random secret embedded in the webhook URL.
+        :param exposed_player_ids: Optional restriction set; only these
+            players are addressable by voice (passed to the player resolver).
+        :param voice_continuation: When True, play- and control-success
+            responses keep the conversation open (``end_session=False``)
+            so the user can issue follow-ups without re-saying the
+            activation phrase. Default False preserves today's voice-UX.
+            Stop / pause-with-no-resume utterances still close the session
+            via the existing control path.
+        :param logger: Optional logger override.
         """
         self._mass = mass
         self._skill_id = skill_id

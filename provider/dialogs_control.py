@@ -396,9 +396,8 @@ def parse_control(
 def _plural_ru(n: int, forms: tuple[str, str, str]) -> str:
     """Pick the correct Russian quantitative form for `n`.
 
-    Args:
-        n: The number.
-        forms: ``(form_for_1, form_for_2_to_4, form_for_5_plus)``.
+    :param n: The number.
+    :param forms: ``(form_for_1, form_for_2_to_4, form_for_5_plus)``.
 
     Russian quantitative agreement:
       1, 21, 31, … → form_for_1 (e.g. "колонку")
