@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-07
+
+UX overhaul of the provider settings form. 20 of 22 recommendations from
+the v1.1.x audit landed; #16 (i18n via translation_key) and #18
+(cross-plugin x_token share with yandex_smarthome) are deferred to v1.3.0.
+
+### Added
+
+- **Numbered setup checklist** (#6) above the auto-create button: 4 rows
+  (Sign in → Confirm code → Register skill → Wait for moderation) with
+  ✓/→/☐/✗ markers showing live progress through the flow.
+- **Visual user_code emphasis** (#7) during Device Flow: code rendered on
+  its own LABEL row with `«guillemets»`, ⏱ countdown to expiry, and
+  separate rows per instruction step.
+- **Actionable post-DONE message** (#10) with three example voice
+  commands interpolating the user's actual skill name (e.g. *«Алиса,
+  попроси <skill name> включи джаз»*).
+- **Identity card** (#5) replacing the bare Skill ID input after a
+  successful auto-create: read-only summary with skill name, Skill ID,
+  full webhook URL, and a `help_link` shortcut to the Yandex Dialogs
+  dev console.
+- **Test webhook reachability** action (#11) — outgoing POST with a
+  sentinel envelope, classifies the response across DNS / TLS / 401 /
+  502 / timeout. Catches reverse-proxy issues *before* the user spends
+  a Device Flow + moderation cycle. New module: `provider/webhook_probe.py`.
+- **Drift-detection LABELs with preview + revert** (#13). When the
+  MA-side Skill name diverges from `last_known_name`, the rename
+  cluster now shows the activation-phrase change (*«Алиса, попроси
+  Old …» → «Алиса, попроси New …»*), the moderation timeline, and a
+  Revert button to discard the half-typed rename.
+- **Regenerate webhook secret** action (#3) in the Advanced section —
+  rotates the secret and resets the auto-create state, so a stray
+  manual edit can't silently orphan the registered URL.
+- **Diagnostics LABEL** (#17) in Advanced: webhook hit count, valid
+  intent count, and "last webhook N sec ago". Counters live on the
+  loaded plugin instance and reset per process.
+- **Skill name validation** (#9) — `≥ 2 words` + 2-64 chars enforced
+  via `ConfigEntry.validate` *before* the Device Flow starts (Yandex
+  rejects single-word names server-side; pre-check spares the user a
+  failed pipeline).
+- **External Base URL inline HTTPS warning** (#8) — description text
+  flips to a ✗ error when the value is `http://`, a private IP, or a
+  loopback host. Optional autodetect via `mass.streams.base_url` /
+  `mass.webserver.base_url` (only when those are *publicly* HTTPS).
+  New module: `provider/url_helpers.py`.
+- **Categories** (#15): Setup / Voice control / Advanced — entries are
+  now grouped via `ConfigEntry.category` for progressive disclosure.
+- **Instance-name split toggle** (#1) — by default the Skill name doubles
+  as the MA-side instance name; flip
+  `CONF_USE_DIFFERENT_INSTANCE_NAME` in Advanced to expose a separate
+  `Instance name` field.
+
+### Changed
+
+- **Action button label flip** (#19): every label now says what *will
+  happen* on the next click ("Sign in to Yandex Passport", "I confirmed
+  — continue", "Continue setup", "Create another skill", "Try again")
+  rather than what just happened. The Cancel button morphs into "Reset
+  (start over)" in FAILED state to signal the wider scope (#21).
+- **Auto-clear stale Device Flow session** (#14) — when the form opens
+  with a persisted `device_session_blob` whose `expires_at_epoch` is in
+  the past, drop it silently and render a clean IDLE state instead of
+  a "Confirm and continue" button against an already-expired code.
+- **Auto-enable voice control on first DONE** (#2) — the "Enable dialog
+  skill" toggle moves to the Voice section and flips to True
+  automatically after a successful auto-create. Power users can still
+  switch it off afterwards.
+- **OAuth token + Skill ID + Webhook URL secret** moved to Advanced and
+  marked `read_only` once the skill is configured (#3, #4, #5). The
+  fields are still editable in Advanced for manual recovery.
+- **Voice-controllable players** moved up into a dedicated Voice
+  control section (#12) so the user notices it during initial setup.
+- **Markdown-free rendering** (#22). Phase 0 confirmed Music
+  Assistant's frontend renders `ConfigEntry(LABEL)` as plain text
+  (Vuetify v-alert with `white-space: normal`). All markdown-style
+  emphasis was replaced with multi-LABEL splits (each row on its own
+  v-alert block) + Unicode emoji + `«guillemets»` for visual structure.
+
+### Notes
+
+- Form rendering style is plain text + Unicode emoji throughout.
+  Markdown / HTML is *not* supported by the MA frontend.
+- Cross-plugin `x_token` share with `yandex_smarthome` (#18) is deferred
+  to v1.3.0 — it requires a sibling refactor of the token store.
+- i18n via `translation_key` (#16) is deferred to v1.3.0 — it requires
+  Lokalise infra + RU/EN translation tables.
+
 ## [1.1.2] — 2026-05-06
 
 ### Fixed

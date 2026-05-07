@@ -69,7 +69,7 @@ secrets.yaml
 # Screenshots (keep bundled assets)
 *.png
 !docs/skill_icon.png
-!provider/auto_skill_logo.png
+!provider/skill_logo.png
 
 # Internal planning docs
 docs/IMPLEMENTATION_PLAN.md
