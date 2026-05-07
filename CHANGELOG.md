@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-05-07
+
+### Fixed
+
+- Three lint findings flagged by Music Assistant's stricter upstream
+  pre-commit (no behaviour change):
+  - `provider/auth_page.py` — converted the `StateProvider` type-alias
+    docstring into a regular comment so `check-docstring-first` does
+    not flag it as a second module docstring.
+  - `tests/test_auto_create.py` — narrowed the file-level `noqa` to
+    `D102` only (`PLW0108` was unused under upstream config) and
+    inlined the `lambda x: _raising_factory(x)` wrapper that
+    triggered `PLW0108` locally.
+  - `tests/test_auto_create.py` — annotated the unreachable `yield`
+    inside the `_raising_factory` async-context-manager with
+    `# type: ignore[unreachable]` so mypy stops reporting it; the
+    `yield` is required for `@asynccontextmanager` to treat the
+    function as a generator even though execution never reaches it.
+
 ## [1.2.0] — 2026-05-07
 
 UX overhaul of the provider settings form. 20 of 22 recommendations from
