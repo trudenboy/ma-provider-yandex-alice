@@ -144,6 +144,121 @@ Multilingual embedding models (`paraphrase-multilingual-MiniLM-L12-v2`, ~120 MB)
 
 ---
 
+## Part 5 — Deep dive: platform NLU ecosystem (2026-05-07 follow-up)
+
+This section adds findings from a second-pass investigation focused on (a) full grammar DSL specification, (b) the `AlexxIT/YandexDialogs` precedent, (c) Python ecosystem around Yandex Dialogs, (d) real-world auto-moderation timing.
+
+### 5.1 Grammar DSL — complete directive list
+
+| Directive | Purpose | Notes |
+|---|---|---|
+| `%lemma` | Match without word-form variation | One rule covers «включи / включите / включай / включить / включим». |
+| `%exact` | Exact string match, no morphology | For proper nouns. |
+| `%negative` | Negative rules | **Must be more specific than positive rules to function correctly.** |
+| `%positive` | Switch back to positive rules | Found in deeper docs; not in our previous survey. |
+
+**Quantifiers:** `?` (0 or 1), `*` (≥0), `+` (≥1).
+
+**`[]` operator** ignores word order — `[включи свет]` matches both «включи свет» and «свет включи». **No regex equivalent in our `parse_command`.**
+
+### 5.2 Free built-in intents
+
+When we declare any custom intent, the platform automatically classifies these alongside ours:
+
+- `YANDEX.CONFIRM` — yes/agreement («да», «хорошо», «давай»)
+- `YANDEX.REJECT` — no/refusal («нет», «не надо», «отмена»)
+- `YANDEX.HELP` — help requests
+- `YANDEX.REPEAT` — «повтори»
+
+**Critical implication for our P0.3 / P0.4 disambiguation flows** (`VOICE_UX_RESEARCH.md`): yes/no/cancel handling becomes free as soon as we declare *any* custom intent, even an empty one. Today these are hand-rolled regex in `dialogs_control.py`. This is a **cheap intermediate step** between "all in-house" and "full grammar migration".
+
+### 5.3 Auto-moderation timing — refined
+
+Previously we cited "5–15 min". Reality from community sources (forum posts, Yandex blog comments):
+
+- **Public skills:** up to 3 days per official docs.
+- **Private skills:** auto-moderation, **«минуты до нескольких часов»**. Email notification on completion.
+- **Every grammar update = re-moderation.** Confirmed by `AlexxIT/YandexDialogs`: "Intent modifications require skill republication, requiring several minutes per update."
+
+**New constraint:** *«Интенты можно настраивать только после публикации навыка»* — intents cannot be edited on a fresh draft, only **after first publication**. This changes our `auto_create.py` bootstrap sequence: publish a minimal draft first, then PATCH grammar, then re-submit for auto-moderation.
+
+### 5.4 Direct precedent — `AlexxIT/YandexDialogs`
+
+The same architecture pattern (programmatic creation of a private skill via `app-store-api` + grammar DSL declaration + webhook receiving pre-classified intents) is in **production** as a Home Assistant component for the Russian smart-home community. README confirms:
+
+- Auto-creates a private skill, publishes it (similar to our `auto_create.py` flow).
+- Declares intents via the platform DSL.
+- Webhook fires `yandex_intent` events with pre-classified `intent` + extracted slots.
+- Confirms our predicted moderation cost: "several minutes per update".
+
+**Grammar examples from their README:**
+
+Calculator with `YANDEX.NUMBER` slots:
+```
+root:
+    сколько будет $x $action $y
+slots:
+    x: { source: $x, type: YANDEX.NUMBER }
+    y: { source: $y, type: YANDEX.NUMBER }
+    action: { source: $action }
+$x: $YANDEX.NUMBER
+$y: $YANDEX.NUMBER
+$action: плюс | минус | умножить на | разделить на
+```
+
+Room enum with custom values (analogous to what we'd want for player names *if* the list were static):
+```
+root:
+    [(какая)? температура $room]
+    [сколько градусов $room]
+slots:
+    room: { source: $room }
+$room:
+    в зале | в ванной | на балконе
+```
+
+**Applicability to our case:** the room enum is the closest analogue to our player resolver. It works for `AlexxIT/YandexDialogs` because room names are static per-installation. **Our player list is dynamic per Music Assistant install** — we can't bake names into a shared grammar without per-user grammar generation, which means PATCH+re-moderation on every device add/rename. Confirms the existing recommendation to keep player resolution in-house.
+
+### 5.5 Python ecosystem inventory
+
+| Project | Role | Relevance to us |
+|---|---|---|
+| `mahenzon/aioalice` | Asyncio wrapper for the Dialogs protocol | Duplicates what `dialogs.py` already does. ROI ~0. |
+| `K1rL3s/aliceio` | Python 3.8+ alternative | Same. |
+| `LazyDeus/alice_types` | Pydantic v2 models for request/response | **Worth evaluating** — could replace ad-hoc `dict[str, Any]` typing in our handler with proper types. Independent of any NLU decision. |
+| `avidale/dialogic` | **Hybrid framework** explicitly supporting "built-in intent classifiers or third-party NLU tools, including grammars from Yandex or any Python-available models". Cascade handler routing with priorities. | Conceptually mirrors the hybrid (platform NLU + our parsers as fallback) we'd build for P1.1. Reference design, not a drop-in. |
+| `denismosolov/alice-entities-library` | Community entity definitions (FIGI, languages, car makes, parts of speech) | **No music entities** today. If we go grammar route, the format is established for contributing `entity Genre` / `entity Artist`. |
+| `vb64/test.helper.yandex.alice.flask` | **Only Python-side test emulator** | Worth probing — if it covers `request.nlu.intents` emission, we'd have local grammar-test capability. Likely envelope-only. |
+
+### 5.6 Local grammar testing — confirmed dead-end in Python
+
+| Tool | Language | What it does |
+|---|---|---|
+| `vitalets/alice-tester` | Node.js | E2E against live skill |
+| `popstas/yandex-dialogs-tester` | Node.js | CLI for CI |
+| Yandex Test Proxy | Browser | Official, uses real grammar |
+| `alice-dev.vitalets.xyz` | Browser | Live device debugging without publish |
+| `alice-cloud-proxy` | Cloud Function | Webhook proxy to dev box |
+| `vb64/test.helper.yandex.alice.flask` | Python | Envelope emulator (extent of NLU coverage unverified) |
+
+**No tool runs Yandex grammar offline in Python.** All grammar validation requires either publication or live skill round-trip. This was already the leading reason to prefer Yargy in-repo over platform DSL; the second-pass research only reinforces it.
+
+### 5.7 Tomita → Yargy lineage
+
+`popstas` blog post (2020): *«Под конец простые регулярные выражения перестали хватать для понимания запросов пользователей, и я начал экспериментировать с Tomita-parser»*. Tomita was Yandex's closed-source C++ rule-based parser; **Yargy is its open-source successor** built on top of pymorphy. The historical evolution `regex → Tomita/Yargy → platform grammar DSL` is independently documented by another developer hitting the same scaling wall we're approaching.
+
+### 5.8 Updated decision sequence
+
+Changes to recommendations from Part 4:
+
+1. **Unchanged:** pymorphy3 drop-in (low risk, immediate).
+2. **Unchanged:** `YANDEX.NUMBER` for relative-volume (low risk, immediate).
+3. **New cheap step:** declare a **single trivial custom intent** to enable free `YANDEX.CONFIRM` / `YANDEX.REJECT` / `YANDEX.HELP` / `YANDEX.REPEAT` classification. ~1 round of moderation, gets ~10 lines of regex out of `dialogs_control.py`. Enables cleaner disambiguation prompts (P0.3/P0.4).
+4. **Defer with confidence:** full grammar migration (P1.1) — `AlexxIT/YandexDialogs` precedent confirms feasibility but also confirms ops cost (re-moderation per change, no offline tests). Yargy remains the in-repo alternative for when/if regex coverage breaks.
+5. **Possible future:** evaluate `LazyDeus/alice_types` for type-safety improvements independent of NLU decisions.
+
+---
+
 ## Sources
 
 ### Yandex Dialogs platform NLU
@@ -186,3 +301,30 @@ Multilingual embedding models (`paraphrase-multilingual-MiniLM-L12-v2`, ~120 MB)
 - `docs/VOICE_UX_RESEARCH.md` § 4 P1.7 (`YANDEX.NUMBER` for relative-volume)
 - `provider/dialogs_nlu.py` (current parse_command + player resolver)
 - `provider/dialogs_control.py` (current parse_control catalogue)
+
+### Part 5 — Additional sources (deep-dive follow-up)
+
+Official documentation:
+- [Модерация навыков](https://yandex.ru/dev/dialogs/alice/doc/ru/moderation)
+- [Управление доступом / приватные навыки](https://yandex.ru/dev/dialogs/alice/doc/access.html)
+- [Полезные ссылки и примеры](https://yandex.ru/dev/dialogs/alice/doc/ru/guides-and-examples)
+
+Direct precedent:
+- [AlexxIT/YandexDialogs (Home Assistant component using Yandex grammar)](https://github.com/AlexxIT/YandexDialogs)
+- [AlexxIT/YandexDialogs README](https://github.com/AlexxIT/YandexDialogs/blob/master/README.md)
+
+Community resources and ecosystem:
+- [sameoldmadness/awesome-alice — catalogue of libraries and tools](https://github.com/sameoldmadness/awesome-alice)
+- [popstas — practical experience building Alice skills (regex → Tomita)](https://blog.popstas.ru/blog/2020/04/14/yandex-dialogs/)
+- [vc.ru — Dev Preview Яндекс.Диалогов](https://vc.ru/dev/121751-dev-preview-yandeksdialogov-novye-vozmozhnosti-i-novyi-format)
+
+Python SDKs and adjacent libraries:
+- [mahenzon/aioalice](https://github.com/mahenzon/aioalice)
+- [K1rL3s/aliceio](https://github.com/K1rL3s/aliceio)
+- [avidale/dialogic — hybrid platform/custom NLU framework](https://github.com/avidale/dialogic)
+- [denismosolov/alice-entities-library — shared grammar entities](https://github.com/denismosolov/alice-entities-library)
+- [LazyDeus/alice_types — Pydantic v2 protocol models](https://github.com/sameoldmadness/awesome-alice)
+
+Testing tools:
+- [vitalets/alice-tester (Node.js)](https://github.com/vitalets/alice-tester)
+- [vitalets/alice-cloud-proxy](https://github.com/vitalets/alice-cloud-proxy)
