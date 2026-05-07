@@ -72,24 +72,30 @@ class TestValidateExternalBaseUrl:
 
 
 class TestTryDetectPublicHttpsUrl:
-    """try_detect_public_https_url probes mass.streams + mass.webserver."""
+    """try_detect_public_https_url reads mass.webserver.base_url only.
 
-    def test_streams_public_https_returned(self) -> None:
-        """When mass.streams.base_url is a public HTTPS URL, return it."""
-        mass = MagicMock()
-        mass.streams.base_url = "https://ma.example.com"
-        mass.webserver.base_url = "http://172.22.0.2:8095"
-        assert try_detect_public_https_url(mass) == "https://ma.example.com"
+    The Yandex webhook lives on the webserver (port 8095 by default),
+    not on the streamserver (8097). Probing ``mass.streams.base_url``
+    would hand the user the streamserver URL — we must read the
+    webserver URL exclusively.
+    """
 
-    def test_streams_internal_falls_through_to_webserver(self) -> None:
-        """When streams is internal but webserver is public HTTPS, return webserver."""
+    def test_webserver_public_https_returned(self) -> None:
+        """When mass.webserver.base_url is a public HTTPS URL, return it."""
         mass = MagicMock()
-        mass.streams.base_url = "http://172.22.0.2:8097"
+        mass.streams.base_url = "http://172.22.0.2:8097"  # ignored
         mass.webserver.base_url = "https://ma.example.com"
         assert try_detect_public_https_url(mass) == "https://ma.example.com"
 
-    def test_both_internal_returns_none(self) -> None:
-        """Typical Docker setup — both internal → None."""
+    def test_streams_public_https_does_not_leak_through(self) -> None:
+        """Even if streams happens to be public HTTPS, we don't return it."""
+        mass = MagicMock()
+        mass.streams.base_url = "https://stream.example.com"
+        mass.webserver.base_url = "http://172.22.0.2:8095"
+        assert try_detect_public_https_url(mass) is None
+
+    def test_webserver_internal_returns_none(self) -> None:
+        """Typical Docker setup — internal → None."""
         mass = MagicMock()
         mass.streams.base_url = "http://172.22.0.2:8097"
         mass.webserver.base_url = "http://172.22.0.2:8095"

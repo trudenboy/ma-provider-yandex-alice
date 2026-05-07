@@ -27,7 +27,12 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-__all__ = ["is_public_https_url", "try_detect_public_https_url", "validate_external_base_url"]
+__all__ = [
+    "is_public_https_url",
+    "try_detect_any_base_url",
+    "try_detect_public_https_url",
+    "validate_external_base_url",
+]
 
 
 def _is_private_or_loopback_host(host: str) -> bool:
@@ -79,29 +84,45 @@ def validate_external_base_url(value: object) -> bool:
 
 
 def try_detect_public_https_url(mass: MusicAssistant) -> str | None:
-    """Best-effort: return MA's public HTTPS Base URL, or None.
+    """Best-effort: return MA's public HTTPS webserver URL, or None.
 
-    Probes (in priority order):
+    Reads ``mass.webserver.base_url`` — the URL where MA's HTTP/WS API
+    is hosted. The Yandex Dialogs webhook lives on this same server
+    (``/api/yandex_dialogs/webhook/<secret>``), so any URL Yandex needs
+    must point at the **webserver**, not at ``mass.streams.base_url``
+    which is a separate audio streamserver port.
 
-    1. ``mass.streams.base_url`` — set when MA core has a publicly reachable
-       streams URL configured.
-    2. ``mass.webserver.base_url`` — same idea on the webserver side.
+    Returns the URL only when :func:`is_public_https_url` says it's a
+    real public URL. In the typical Docker / HA Ingress / local-only
+    setup webserver returns ``http://<internal-ip>:port`` and we
+    return None.
 
-    Either is accepted only when :func:`is_public_https_url` says it's a
-    real public URL. In the typical Docker / HA Ingress / local-only setup
-    both return ``http://<internal-ip>:port`` and we return None.
-
-    Safe to call from ``get_config_entries`` — purely attribute access, no
-    config-controller locks.
+    Safe to call from ``get_config_entries`` — purely attribute access,
+    no config-controller locks.
     """
-    candidates: list[str | None] = []
-    streams_obj = getattr(mass, "streams", None)
-    candidates.append(getattr(streams_obj, "base_url", None) if streams_obj else None)
     webserver_obj = getattr(mass, "webserver", None)
-    candidates.append(getattr(webserver_obj, "base_url", None) if webserver_obj else None)
+    candidate = getattr(webserver_obj, "base_url", None) if webserver_obj else None
+    if isinstance(candidate, str) and is_public_https_url(candidate):
+        _LOGGER.debug("autodetected public HTTPS base URL: %r", candidate)
+        return candidate.strip().rstrip("/")
+    return None
 
-    for candidate in candidates:
-        if isinstance(candidate, str) and is_public_https_url(candidate):
-            _LOGGER.debug("autodetected public HTTPS base URL: %r", candidate)
-            return candidate.strip().rstrip("/")
+
+def try_detect_any_base_url(mass: MusicAssistant) -> str | None:
+    """Best-effort: return *any* base URL of MA's webserver, public or not.
+
+    Falls back from :func:`try_detect_public_https_url` so the user
+    sees a pre-filled value to edit even when MA is reachable only
+    via a private IP / HTTP. Like the public-only variant, this
+    intentionally only inspects ``mass.webserver.base_url`` — the
+    webhook lives on the webserver, not on the streamserver.
+    """
+    public = try_detect_public_https_url(mass)
+    if public:
+        return public
+    webserver_obj = getattr(mass, "webserver", None)
+    candidate = getattr(webserver_obj, "base_url", None) if webserver_obj else None
+    if isinstance(candidate, str) and candidate.strip():
+        _LOGGER.debug("autodetected webserver base URL (non-public): %r", candidate)
+        return candidate.strip().rstrip("/")
     return None

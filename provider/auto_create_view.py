@@ -35,8 +35,6 @@ collapse into spaces. We compensate by:
 
 from __future__ import annotations
 
-import time
-
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import ConfigEntryType
 from ya_dialogs_api import SkillCreationArtifacts, SkillCreationState
@@ -49,12 +47,15 @@ from .constants import (
     CONF_ACTION_CANCEL_EDIT,
     CONF_ACTION_EDIT_SKILL,
     CONF_ACTION_RECREATE_DUPLICATE,
+    CONF_ACTION_TEST_WEBHOOK,
     CONF_ACTION_UPDATE_SKILL,
     CONF_DIALOG_ACTIVATION_PHRASES,
     CONF_DIALOG_SKILL_NAME,
     CONF_DIALOG_SKILL_VOICE,
+    CONF_EXTERNAL_BASE_URL,
     DIALOG_VOICE_DEFAULT,
     DIALOG_VOICE_OPTIONS,
+    DIALOG_WEBHOOK_BASE_PATH,
 )
 
 __all__ = [
@@ -71,22 +72,18 @@ __all__ = [
 def derive_active_step(
     *,
     artifacts: SkillCreationArtifacts,
-    pending_session_present: bool,
     cached_x_token_present: bool,
 ) -> int:
     """Return 1, 2, or 3 — which top-level section is rendered now.
 
-    - **Step 1 (Authenticate)**: no cached x_token *or* an in-flight
-      Device Flow. Until the user has confirmed sign-in we cannot
-      proceed; everything else is hidden so the form can't outrun
-      Yandex Passport.
-    - **Step 3 (Skill registered)**: artifacts in ``DONE`` state — the
-      skill exists at Yandex's side, we move to the post-create
+    - **Step 1 (Authenticate)**: no cached x_token. Until the user
+      has signed in we cannot proceed; everything else is hidden so
+      the form can't outrun Yandex Passport.
+    - **Step 3 (Skill registered)**: artifacts in ``DONE`` state —
+      the skill exists at Yandex's side, we move to the post-create
       identity card.
     - **Step 2 (Create skill)**: everything in between.
     """
-    if pending_session_present:
-        return 1
     if not cached_x_token_present:
         return 1
     if artifacts.state == SkillCreationState.DONE:
@@ -97,20 +94,16 @@ def derive_active_step(
 def _derive_stage(
     *,
     artifacts: SkillCreationArtifacts,
-    pending_session_present: bool,
     cached_x_token_present: bool,
     duplicate_pending: bool,
 ) -> LocalAutoCreateStage:
     """Derive the legacy stage enum from persistent state.
 
-    Used for back-compat in ``AutoCreateOutcome`` dispatching and unit
-    tests; the new section rendering keys off ``derive_active_step``
-    above. ``duplicate_pending`` is a transient flag from the dispatcher
-    (set when ``run_auto_create_step`` returned ``DUPLICATE_DETECTED``
-    on the previous click — persisted via a hidden config entry).
+    Used for the Step 2 button-label / section variant routing.
+    ``duplicate_pending`` is a transient flag from the dispatcher
+    (set when ``run_create_skill`` returned ``DUPLICATE_DETECTED`` on
+    the previous click — persisted via a hidden config entry).
     """
-    if pending_session_present:
-        return LocalAutoCreateStage.DEVICE_FLOW_STARTED
     if duplicate_pending:
         return LocalAutoCreateStage.DUPLICATE_DETECTED
     if artifacts.state == SkillCreationState.DONE:
@@ -128,21 +121,6 @@ def _derive_stage(
     return LocalAutoCreateStage.IDLE
 
 
-def _format_time_remaining(expires_at_epoch: float | None) -> str | None:
-    """Return ``M:SS`` (or ``mins`` for >= 5 min) string for code countdown.
-
-    None → no display. Used in user_code instructions.
-    """
-    if not expires_at_epoch:
-        return None
-    remaining = int(expires_at_epoch - time.time())
-    if remaining <= 0:
-        return None
-    if remaining >= 300:
-        return f"{remaining // 60} min"
-    return f"{remaining // 60}:{remaining % 60:02d}"
-
-
 # ---------------------------------------------------------------------------
 # Step 1 — Authenticate
 # ---------------------------------------------------------------------------
@@ -150,27 +128,20 @@ def _format_time_remaining(expires_at_epoch: float | None) -> str | None:
 
 def _render_step1_auth_section(
     *,
-    pending_session_present: bool,
-    pending_user_code: str | None,
-    pending_verification_url: str | None,
-    pending_expires_at_epoch: float | None,
-    auth_helper_url: str | None,
     last_error: str | None,
 ) -> tuple[ConfigEntry, ...]:
     """Render the *Authenticate* section.
 
-    States:
+    Single state: friendly intro + *Sign in to Yandex Passport*
+    button. The click is **blocking** — the dispatcher hands off to
+    :func:`provider.auth_page.perform_device_auth` which opens an
+    AuthenticationHelper popup, displays the user_code, and waits
+    until Yandex confirms (or the code expires). On success the
+    captured ``x_token`` is written to ``values`` and the form
+    re-renders into Step 2.
 
-    - **No pending session** → friendly intro + *Sign in to Yandex
-      Passport* button. When ``auth_helper_url`` is provided we hand it
-      off to MA's ``AuthenticationHelper`` popup (Apple Music pattern);
-      otherwise we fall back to inline Device Flow instructions inside
-      this provider's settings page.
-    - **Pending session** → user_code + verification URL + countdown +
-      *I confirmed — continue* button + *Cancel sign-in* button.
-    - **Last error** (post-cancel / post-failure) is surfaced above the
-      action button so the user understands why the form snapped back
-      to Step 1.
+    ``last_error`` (post-failure) is surfaced above the action so
+    the user understands why the form snapped back to Step 1.
     """
     entries: list[ConfigEntry] = [
         ConfigEntry(
@@ -189,124 +160,31 @@ def _render_step1_auth_section(
             )
         )
 
-    if not pending_session_present:
-        entries.append(
-            ConfigEntry(
-                key="label_step1_intro",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    "Click 'Sign in to Yandex Passport' below — Music "
-                    "Assistant will open a sign-in popup with a short "
-                    "verification code that you confirm in your Yandex "
-                    "account. You only need to do this once per install."
-                ),
-            )
-        )
-        entries.append(
-            ConfigEntry(
-                key=CONF_ACTION_AUTO_CREATE_DIALOG,
-                type=ConfigEntryType.ACTION,
-                label="Sign in to Yandex Passport",
-                description=(
-                    "Starts the Yandex Passport Device Flow. We never "
-                    "see your password — Yandex hands us a long-lived "
-                    "x_token only after you confirm the code."
-                ),
-                action=CONF_ACTION_AUTO_CREATE_DIALOG,
-                action_label="Sign in to Yandex Passport",
-                required=False,
-                default_value="",
-            )
-        )
-        return tuple(entries)
-
-    # Pending Device Flow — show the user_code or hand off to popup.
-    if auth_helper_url:
-        entries.append(
-            ConfigEntry(
-                key="label_step1_helper_intro",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    "A sign-in popup should be open. If you closed it, "
-                    "click 'Resume sign-in' to reopen the page that "
-                    "shows the verification code."
-                ),
-            )
-        )
-        entries.append(
-            ConfigEntry(
-                key="label_step1_helper_link",
-                type=ConfigEntryType.LABEL,
-                label=f"Resume sign-in: {auth_helper_url}",
-                help_link=auth_helper_url,
-            )
-        )
-    elif pending_user_code and pending_verification_url:
-        countdown = _format_time_remaining(pending_expires_at_epoch)
-        countdown_str = f"  ⏱ Code expires in {countdown}" if countdown else ""
-        entries.extend(
-            [
-                ConfigEntry(
-                    key="label_step1_devflow_step1",
-                    type=ConfigEntryType.LABEL,
-                    label=f"➊  Open in your browser: {pending_verification_url}",
-                ),
-                ConfigEntry(
-                    key="label_step1_devflow_step2",
-                    type=ConfigEntryType.LABEL,
-                    label=f"➋  Enter this code: «{pending_user_code}»{countdown_str}",
-                ),
-                ConfigEntry(
-                    key="label_step1_devflow_step3",
-                    type=ConfigEntryType.LABEL,
-                    label="➌  Confirm in your Yandex account",
-                ),
-                ConfigEntry(
-                    key="label_step1_devflow_step4",
-                    type=ConfigEntryType.LABEL,
-                    label="➍  Click 'I confirmed — continue' below",
-                ),
-            ]
-        )
-    else:
-        entries.append(
-            ConfigEntry(
-                key="label_step1_devflow_generic",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    "Device Flow in progress. Click 'I confirmed — "
-                    "continue' to check, or 'Cancel sign-in' to abort."
-                ),
-            )
-        )
-
     entries.append(
         ConfigEntry(
-            key=CONF_ACTION_AUTO_CREATE_DIALOG,
-            type=ConfigEntryType.ACTION,
-            label="I confirmed — continue",
-            description=(
-                "Polls Yandex Passport once. If you've confirmed the "
-                "code we'll capture the long-lived x_token and move on "
-                "to Step 2 automatically."
+            key="label_step1_intro",
+            type=ConfigEntryType.LABEL,
+            label=(
+                "Click 'Sign in to Yandex Passport' below — Music "
+                "Assistant will open a sign-in popup with a short "
+                "verification code that you confirm in your Yandex "
+                "account. You only need to do this once per install."
             ),
-            action=CONF_ACTION_AUTO_CREATE_DIALOG,
-            action_label="I confirmed — continue",
-            required=False,
-            default_value="",
         )
     )
     entries.append(
         ConfigEntry(
-            key=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+            key=CONF_ACTION_AUTO_CREATE_DIALOG,
             type=ConfigEntryType.ACTION,
-            label="Cancel sign-in",
+            label="Sign in to Yandex Passport",
             description=(
-                "Aborts the current Yandex Passport sign-in. Any cached "
-                "x_token from a previous successful flow is preserved."
+                "Starts the Yandex Passport Device Flow. We never "
+                "see your password — Yandex hands us a long-lived "
+                "x_token only after you confirm the code in the "
+                "popup window."
             ),
-            action=CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
-            action_label="Cancel",
+            action=CONF_ACTION_AUTO_CREATE_DIALOG,
+            action_label="Sign in to Yandex Passport",
             required=False,
             default_value="",
         )
@@ -319,26 +197,81 @@ def _render_step1_auth_section(
 # ---------------------------------------------------------------------------
 
 
+def _build_external_base_url_entries(
+    *,
+    external_base_url: str,
+    description: str,
+    is_valid: bool,
+) -> tuple[ConfigEntry, ...]:
+    """Render the external base URL field inline at Step 2.
+
+    The URL is required before the user can click *Create skill* — we
+    surface it directly inside the step rather than buried in a Setup
+    section. ``description`` is the contextual hint (auto-detected /
+    HTTPS-required / OK), set by the dispatcher.
+    """
+    entries = [
+        ConfigEntry(
+            key=CONF_EXTERNAL_BASE_URL,
+            type=ConfigEntryType.STRING,
+            label="External base URL (HTTPS, required)",
+            description=description,
+            required=False,
+            value=external_base_url,
+            default_value="",
+        ),
+    ]
+    if is_valid:
+        entries.append(
+            ConfigEntry(
+                key=CONF_ACTION_TEST_WEBHOOK,
+                type=ConfigEntryType.ACTION,
+                label="Test webhook reachability",
+                description=(
+                    "Sends a sentinel POST to <external_base_url>"
+                    f"{DIALOG_WEBHOOK_BASE_PATH}/<secret> and reports "
+                    "the result. Catches DNS / TLS / reverse-proxy "
+                    "issues *before* you spend a Yandex moderation "
+                    "cycle on a broken setup."
+                ),
+                action=CONF_ACTION_TEST_WEBHOOK,
+                action_label="Test webhook",
+                required=False,
+                default_value="",
+            )
+        )
+    return tuple(entries)
+
+
 def _render_step2_create_section(
     *,
     stage: LocalAutoCreateStage,
     artifacts: SkillCreationArtifacts,
-    action_outcome: AutoCreateOutcome | None,
+    action_outcome: AutoCreateOutcome | None,  # noqa: ARG001  # reserved for outcome banner
     duplicate_skill_name: str | None,
     duplicate_skill_id: str | None,
+    external_base_url: str,
+    base_url_description: str,
+    base_url_valid: bool,
+    update_message: str | None,
 ) -> tuple[ConfigEntry, ...]:
     """Render the *Create skill* section.
 
+    Inlines the *external base URL* field (and the *Test webhook*
+    button when the URL is valid) directly inside the step — that is
+    the user's only required input here, so it must be visible
+    alongside the action button rather than buried elsewhere.
+
     States:
 
-    - **IDLE post-auth**: ready to create. Show the skill name field
-      summary + *Create skill* button.
+    - **IDLE post-auth**: ready to create. Show the URL field +
+      *Create skill* button (button hidden until URL is valid HTTPS).
     - **PIPELINE_RUNNING**: setup was interrupted. *Continue setup*
       button to resume from the last completed sub-step.
-    - **DUPLICATE_DETECTED**: a skill with the same name already exists
-      in the user's Yandex account. Two resolution buttons:
-      *Recreate* (delete + register fresh) and *Adopt* (re-deploy the
-      existing skill against our backend URL).
+    - **DUPLICATE_DETECTED**: a skill with the same name already
+      exists in the user's Yandex account. Two resolution buttons:
+      *Recreate* (delete + register fresh) and *Adopt* (re-deploy
+      the existing skill against our backend URL).
     - **FAILED**: pipeline error. Show last_error + *Try again* +
       *Reset (start over)*.
     """
@@ -353,20 +286,28 @@ def _render_step2_create_section(
             type=ConfigEntryType.LABEL,
             label="✓ Signed in to Yandex Passport.",
         ),
+        *_build_external_base_url_entries(
+            external_base_url=external_base_url,
+            description=base_url_description,
+            is_valid=base_url_valid,
+        ),
     ]
 
-    if (
-        action_outcome is not None
-        and action_outcome.user_message
-        and stage in (LocalAutoCreateStage.FAILED, LocalAutoCreateStage.DUPLICATE_DETECTED)
+    if update_message and stage not in (
+        LocalAutoCreateStage.FAILED,
+        LocalAutoCreateStage.DUPLICATE_DETECTED,
     ):
         entries.append(
             ConfigEntry(
-                key="label_step2_outcome_msg",
+                key="label_step2_update_msg",
                 type=ConfigEntryType.LABEL,
-                label=action_outcome.user_message,
+                label=update_message,
             )
         )
+
+    # The DUPLICATE_DETECTED branch shows its own structured prompt
+    # (see below); FAILED renders artifacts.last_error directly. The
+    # outcome message would duplicate either, so we skip it here.
 
     if stage == LocalAutoCreateStage.DUPLICATE_DETECTED:
         name = duplicate_skill_name or artifacts.last_known_name or ""
@@ -528,6 +469,10 @@ def _render_step2_create_section(
         return tuple(entries)
 
     # Default IDLE-post-auth → ready to create.
+    # We render the Create button unconditionally and let the action
+    # handler fail loudly with a FAILED outcome if the URL is missing
+    # or non-public. Hiding the button on URL change would require a
+    # form re-render that doesn't happen on plain text input.
     entries.append(
         ConfigEntry(
             key="label_step2_intro",
@@ -535,7 +480,8 @@ def _render_step2_create_section(
             label=(
                 "Click 'Create skill' below — Music Assistant will "
                 "register a new dialog skill in your Yandex Dialogs "
-                "account using the Skill name you set above."
+                "account using the Skill name you set above. The "
+                "external base URL must be filled in above first."
             ),
         )
     )
@@ -748,13 +694,8 @@ def _render_step3_configured_section(
 def build_auto_create_entries(  # noqa: PLR0913
     *,
     artifacts: SkillCreationArtifacts,
-    pending_session_present: bool,
     cached_x_token_present: bool,
     action_outcome: AutoCreateOutcome | None,
-    pending_user_code: str | None = None,
-    pending_verification_url: str | None = None,
-    pending_expires_at_epoch: float | None = None,
-    auth_helper_url: str | None = None,
     duplicate_skill_name: str | None = None,
     duplicate_skill_id: str | None = None,
     edit_mode: bool = False,
@@ -763,12 +704,15 @@ def build_auto_create_entries(  # noqa: PLR0913
     voice: str = DIALOG_VOICE_DEFAULT,
     update_message: str | None = None,
     last_error: str | None = None,
+    external_base_url: str = "",
+    base_url_description: str = "",
+    base_url_valid: bool = False,
 ) -> tuple[ConfigEntry, ...]:
     """Render the active step's section based on persistent state.
 
     Exactly one of three sections is returned:
 
-    - **Step 1**: Authenticate (Device Flow / popup hand-off).
+    - **Step 1**: Authenticate (blocking Device Flow + popup).
     - **Step 2**: Create skill (with duplicate-name pre-check).
     - **Step 3**: Skill registered (identity card + edit mode).
 
@@ -778,25 +722,16 @@ def build_auto_create_entries(  # noqa: PLR0913
     """
     step = derive_active_step(
         artifacts=artifacts,
-        pending_session_present=pending_session_present,
         cached_x_token_present=cached_x_token_present,
     )
     stage = _derive_stage(
         artifacts=artifacts,
-        pending_session_present=pending_session_present,
         cached_x_token_present=cached_x_token_present,
         duplicate_pending=bool(duplicate_skill_id),
     )
 
     if step == 1:
-        return _render_step1_auth_section(
-            pending_session_present=pending_session_present,
-            pending_user_code=pending_user_code,
-            pending_verification_url=pending_verification_url,
-            pending_expires_at_epoch=pending_expires_at_epoch,
-            auth_helper_url=auth_helper_url,
-            last_error=last_error,
-        )
+        return _render_step1_auth_section(last_error=last_error)
     if step == 3:
         return _render_step3_configured_section(
             artifacts=artifacts,
@@ -812,4 +747,8 @@ def build_auto_create_entries(  # noqa: PLR0913
         action_outcome=action_outcome,
         duplicate_skill_name=duplicate_skill_name,
         duplicate_skill_id=duplicate_skill_id,
+        external_base_url=external_base_url,
+        base_url_description=base_url_description,
+        base_url_valid=base_url_valid,
+        update_message=update_message,
     )

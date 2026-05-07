@@ -146,6 +146,24 @@ class _MassEvent:
 
 _ensure_module("music_assistant_models.event", {"MassEvent": _MassEvent})
 
+
+# music_assistant_models.errors
+class _LoginFailed(Exception):
+    """Stub of music_assistant_models.errors.LoginFailed."""
+
+
+class _ResourceTemporarilyUnavailable(Exception):
+    """Stub of music_assistant_models.errors.ResourceTemporarilyUnavailable."""
+
+
+_ensure_module(
+    "music_assistant_models.errors",
+    {
+        "LoginFailed": _LoginFailed,
+        "ResourceTemporarilyUnavailable": _ResourceTemporarilyUnavailable,
+    },
+)
+
 # ---------------------------------------------------------------------------
 # 2. Mock music_assistant server modules
 # ---------------------------------------------------------------------------
