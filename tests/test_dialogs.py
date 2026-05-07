@@ -381,6 +381,139 @@ class TestPlatformIntentDispatch:
 
 
 @pytest.mark.asyncio
+class TestBuiltInIntents:
+    """Phase 2 follow-up: YANDEX.REJECT / YANDEX.HELP handling in pending flows."""
+
+    def _handler(self, mass: MagicMock) -> DialogsWebhookHandler:
+        return DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
+
+    async def test_reject_in_pending_disambiguation_cancels(self) -> None:
+        """YANDEX.REJECT clears pending_command and ends session with confirmation."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "отмена",
+                "nlu": {"intents": {"YANDEX.REJECT": {}}},
+            },
+            "state": {
+                "session": {
+                    "pending_command": {
+                        "kind": "search",
+                        "query": "metallica",
+                        "radio_mode": True,
+                        "candidate_ids": ["p1", "p2"],
+                    }
+                }
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is True
+        assert "отменил" in body_out["response"]["text"].lower()
+        # pending_command cleared from session_state on response.
+        assert "pending_command" not in body_out["session_state"]
+        mass.player_queues.play_media.assert_not_awaited()
+
+    async def test_reject_in_awaiting_query_cancels(self) -> None:
+        """YANDEX.REJECT in slot-elicit ('Что включить?') also exits cleanly."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "неважно",
+                "nlu": {"intents": {"YANDEX.REJECT": {}}},
+            },
+            "state": {"session": {"awaiting_query": True}},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is True
+        assert "awaiting_query" not in body_out["session_state"]
+
+    async def test_reject_with_no_pending_falls_through(self) -> None:
+        """YANDEX.REJECT outside of any prompt context → falls through to normal flow.
+
+        The intent isn't a free-standing 'cancel app' signal — the user
+        could just be talking. If parse_command also can't make sense of
+        'отмена', it lands as a normal "не нашёл" search response.
+        """
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "отмена",
+                "nlu": {"intents": {"YANDEX.REJECT": {}}},
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        # NOT the cancel response — handler fell through to play-search.
+        assert "отменил" not in body_out["response"]["text"].lower()
+
+    async def test_help_in_pending_emits_disambiguation_hint(self) -> None:
+        """YANDEX.HELP during disambiguation tells the user how to answer."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "помоги",
+                "nlu": {"intents": {"YANDEX.HELP": {}}},
+            },
+            "state": {
+                "session": {
+                    "pending_command": {
+                        "kind": "search",
+                        "query": "metallica",
+                        "radio_mode": True,
+                        "candidate_ids": ["p1", "p2"],
+                    }
+                }
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is False
+        assert "колонки" in body_out["response"]["text"].lower()
+
+    async def test_help_in_awaiting_emits_query_hint(self) -> None:
+        """YANDEX.HELP during slot-elicit suggests example queries."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "что я могу",
+                "nlu": {"intents": {"YANDEX.HELP": {}}},
+            },
+            "state": {"session": {"awaiting_query": True}},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is False
+        assert "артиста" in body_out["response"]["text"].lower()
+
+    async def test_help_clean_state_emits_generic_hint(self) -> None:
+        """YANDEX.HELP with no in-flight prompt → generic example."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        handler = self._handler(mass)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {
+                "command": "помощь",
+                "nlu": {"intents": {"YANDEX.HELP": {}}},
+            },
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        body_out = _response_body(resp)
+        assert "включи рок" in body_out["response"]["text"].lower()
+
+
+@pytest.mark.asyncio
 class TestVoiceContinuation:
     """Phase 1 / P1.4: opt-in `end_session=false` after play / control success."""
 

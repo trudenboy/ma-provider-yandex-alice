@@ -602,6 +602,50 @@ class DialogsWebhookHandler:
         nlu_entities = nlu.get("entities") if isinstance(nlu.get("entities"), list) else None
         nlu_intents = nlu.get("intents") if isinstance(nlu.get("intents"), dict) else None
 
+        # Built-in YANDEX.* intents — emitted automatically by Yandex once
+        # any custom grammar is declared. Two we care about today:
+        #
+        # * YANDEX.REJECT ("отмена / нет / неважно / отстань") — back out
+        #   of any in-flight prompt. Clears pending_command / awaiting_query
+        #   and ends the session so the user can speak again from scratch.
+        # * YANDEX.HELP ("помоги / что я могу / помощь") — surface a
+        #   contextual hint depending on the current prompt; keeps state
+        #   so the user can answer the original question afterwards.
+        #
+        # YANDEX.CONFIRM and YANDEX.REPEAT aren't wired today: confirm is
+        # ambiguous in our flows (which player are you confirming?) and
+        # repeat would require caching the last response on session_state
+        # — both deferred to a later session.
+        if isinstance(nlu_intents, dict):
+            if "YANDEX.REJECT" in nlu_intents and (pending_in or awaiting_in):
+                self._logger.debug("YANDEX.REJECT in pending/awaiting state → cancel")
+                text = "Хорошо, отменил."
+                return self._yandex_response(
+                    incoming_session=session,
+                    text=text,
+                    tts=_tts_for(text),
+                    end_session=True,
+                    session_state=_without_pending(session_state_in),
+                    application_state=_without_pending(app_state_in),
+                )
+            if "YANDEX.HELP" in nlu_intents:
+                if pending_in:
+                    text = "Скажи имя колонки или её номер из списка."
+                elif awaiting_in:
+                    text = "Скажи имя артиста, песни, альбома или плейлиста."
+                else:
+                    text = "Скажи, например: включи рок на кухне."
+                self._logger.debug("YANDEX.HELP → contextual hint")
+                return self._yandex_response(
+                    incoming_session=session,
+                    text=text,
+                    tts=_tts_for(text),
+                    end_session=False,
+                    # Preserve pending/awaiting state so the user can answer the
+                    # original prompt right after this hint.
+                    session_state=session_state_in,
+                )
+
         # Phase 2 — platform-pre-classified intents take precedence over
         # the regex parsers. When grammar matched the phrase upstream,
         # the result lands in `request.nlu.intents.<form_name>`; map it
