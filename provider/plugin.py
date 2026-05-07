@@ -75,7 +75,7 @@ class YandexAlicePlugin(PluginProvider):
         """Expose a tiny status snapshot for MA diagnostics."""
         handler = self._dialogs_handler
         webhook_calls_total = handler.webhook_call_count if handler else 0
-        intent_calls_total = handler.intent_dispatch_count if handler else 0
+        authenticated_calls_total = handler.authenticated_call_count if handler else 0
         last_webhook_ts = handler.last_webhook_ts if handler else None
         return {
             "instance_name": self._instance_name,
@@ -86,6 +86,6 @@ class YandexAlicePlugin(PluginProvider):
             ),
             "handler_active": handler is not None,
             "webhook_calls_total": webhook_calls_total,
-            "intent_calls_total": intent_calls_total,
+            "authenticated_calls_total": authenticated_calls_total,
             "last_webhook_ts": last_webhook_ts,
         }

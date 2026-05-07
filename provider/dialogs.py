@@ -247,7 +247,7 @@ class DialogsWebhookHandler:
         # plugin instance — used by the Advanced section of the config form
         # to show "N webhooks today, last X seconds ago".
         self._webhook_call_count: int = 0
-        self._intent_dispatch_count: int = 0
+        self._authenticated_call_count: int = 0
         self._last_webhook_ts: float | None = None
 
     @property
@@ -256,9 +256,16 @@ class DialogsWebhookHandler:
         return self._webhook_call_count
 
     @property
-    def intent_dispatch_count(self) -> int:
-        """Subset of webhook calls that resolved into an MA player action."""
-        return self._intent_dispatch_count
+    def authenticated_call_count(self) -> int:
+        """Webhook calls that passed the skill_id + secret gate.
+
+        Counts every authenticated request — including slot-elicitation,
+        disambiguation, and info-only intents — not just calls that
+        resolved into a player action. Use this as a "we are receiving
+        traffic from Yandex" health signal, not as a "voice commands
+        actually did something" metric.
+        """
+        return self._authenticated_call_count
 
     @property
     def last_webhook_ts(self) -> float | None:
@@ -394,8 +401,10 @@ class DialogsWebhookHandler:
             return web.Response(status=401)
 
         # Past the skill_id gate the request is genuine traffic from our
-        # registered Yandex skill — count it as a real intent dispatch.
-        self._intent_dispatch_count += 1
+        # registered Yandex skill. Counts ALL authenticated requests
+        # (slot elicitation, disambiguation, info-only) — NOT just calls
+        # that resolve into a player action. Health signal only.
+        self._authenticated_call_count += 1
 
         # State buckets. Three-tier read priority:
         #   1. ``state.session``  — per-conversation, set by us last turn.

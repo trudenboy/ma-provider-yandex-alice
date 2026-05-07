@@ -83,6 +83,7 @@ from .publication_status import (
     STATUS_ON_AIR,
     STATUS_REJECTED,
 )
+from .url_helpers import validate_external_base_url
 
 
 def _publication_status_banner(
@@ -289,6 +290,7 @@ def _skill_create_subblock(
             required=False,
             value=external_base_url,
             default_value="",
+            validate=validate_external_base_url,
         ),
     ]
     if base_url_valid:
@@ -760,6 +762,7 @@ def _skill_advanced_subblock(  # noqa: PLR0913
                 value=external_base_url,
                 default_value="",
                 advanced=True,
+                validate=validate_external_base_url,
             )
         )
     entries.append(

@@ -156,13 +156,6 @@ async def _list_player_options(mass: MusicAssistant) -> list[ConfigValueOption]:
     return options
 
 
-def _name_drifted(artifacts: SkillCreationArtifacts, skill_name: str) -> bool:
-    """Detect divergence between MA-side `skill_name` and Yandex `last_known_name`."""
-    return bool(
-        artifacts.last_known_name and artifacts.last_known_name.strip() != skill_name.strip()
-    )
-
-
 def _build_diagnostics_entries(
     mass: MusicAssistant, instance_id: str | None
 ) -> tuple[ConfigEntry, ...]:
@@ -190,15 +183,17 @@ def _build_diagnostics_entries(
                 key="label_diagnostics_inactive",
                 type=ConfigEntryType.LABEL,
                 label=(
-                    "Diagnostics: webhook handler not active "
-                    "(skill disabled or credentials missing)."
+                    "Diagnostics: webhook handler not active — "
+                    "skill_id or webhook_secret missing in saved config. "
+                    "Run Create skill to register a new skill, or paste an "
+                    "existing skill_id + secret in Advanced."
                 ),
                 advanced=True,
             ),
         )
 
     webhook_calls = int(stats.get("webhook_calls_total") or 0)
-    intent_calls = int(stats.get("intent_calls_total") or 0)
+    authenticated_calls = int(stats.get("authenticated_calls_total") or 0)
     last_ts_raw = stats.get("last_webhook_ts")
     if isinstance(last_ts_raw, (int, float)) and last_ts_raw > 0:
         delta = max(0, int(time.time() - last_ts_raw))
@@ -212,8 +207,8 @@ def _build_diagnostics_entries(
         last_ago = "never"
 
     summary = (
-        f"Diagnostics: {webhook_calls} webhook hits ({intent_calls} valid "
-        f"intents) · last webhook {last_ago}."
+        f"Diagnostics: {webhook_calls} webhook hits "
+        f"({authenticated_calls} past auth) · last webhook {last_ago}."
     )
     return (
         ConfigEntry(
@@ -221,208 +216,6 @@ def _build_diagnostics_entries(
             type=ConfigEntryType.LABEL,
             label=summary,
             advanced=True,
-        ),
-    )
-
-
-def _build_instance_name_section(
-    *, instance_name: str, skill_name: str, use_different: bool
-) -> tuple[ConfigEntry, ...]:
-    """Render the Instance-name split toggle + conditional field (#1).
-
-    Default is *merged* — the Yandex skill name doubles as the MA-side
-    instance name. Toggle this on to split them (rare; useful when an
-    install was created before v1.2.0 with different values).
-    """
-    entries: list[ConfigEntry] = [
-        ConfigEntry(
-            key=CONF_USE_DIFFERENT_INSTANCE_NAME,
-            type=ConfigEntryType.BOOLEAN,
-            label="Use a different MA-side instance name",
-            description=(
-                "By default the Skill name above is also used as the "
-                "instance name shown in Music Assistant's provider list. "
-                "Turn this on to specify a different MA-side name (e.g. "
-                "to keep the skill name short for voice but show a "
-                "longer label in MA settings)."
-            ),
-            required=False,
-            default_value=False,
-            advanced=True,
-        ),
-    ]
-    if use_different:
-        entries.append(
-            ConfigEntry(
-                key=CONF_INSTANCE_NAME,
-                type=ConfigEntryType.STRING,
-                label="Instance name (MA-side display)",
-                description=(
-                    "Display name shown in Music Assistant's provider list. "
-                    "Independent from the Skill name (which is what users "
-                    "say to Alice)."
-                ),
-                required=False,
-                default_value=instance_name or DIALOG_DEFAULT_NAME,
-                advanced=True,
-                depends_on=CONF_USE_DIFFERENT_INSTANCE_NAME,
-                depends_on_value=True,
-            )
-        )
-    else:
-        # Hidden carrier so MA still has a value to use in display contexts;
-        # always tracks skill_name when the toggle is off.
-        entries.append(
-            ConfigEntry(
-                key=CONF_INSTANCE_NAME,
-                type=ConfigEntryType.STRING,
-                label="Instance name (auto)",
-                required=False,
-                default_value=skill_name or DIALOG_DEFAULT_NAME,
-                hidden=True,
-            )
-        )
-    return tuple(entries)
-
-
-def _build_rename_cluster(
-    *,
-    artifacts: SkillCreationArtifacts,
-    cached_x_token: str,
-    skill_name: str,
-    update_message: str | None,
-) -> tuple[ConfigEntry, ...]:
-    """Render the rename / drift-sync action cluster (#13).
-
-    Visible only when the skill exists *and* we have a cached x_token (so a
-    rename can run without a fresh Device Flow). When the MA-side
-    ``Skill name`` differs from ``artifacts.last_known_name``, a multi-line
-    preview tells the user exactly what activation phrase will change and
-    offers a "Revert" button to abandon the half-typed rename.
-    """
-    if not (artifacts.skill_id and cached_x_token):
-        return ()
-
-    drifted = _name_drifted(artifacts, skill_name)
-    entries: list[ConfigEntry] = []
-
-    if update_message:
-        entries.append(
-            ConfigEntry(
-                key="label_rename_outcome",
-                type=ConfigEntryType.LABEL,
-                label=update_message,
-            )
-        )
-
-    if drifted and artifacts.last_known_name:
-        old = artifacts.last_known_name
-        entries.append(
-            ConfigEntry(
-                key="label_rename_drift_header",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    f"⚠ Skill name in Yandex is «{old}», but the field above says «{skill_name}»."
-                ),
-            )
-        )
-        entries.append(
-            ConfigEntry(
-                key="label_rename_drift_phrase",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    f"  Renaming will change the activation phrase from "
-                    f"«Алиса, попроси {old} …» to «Алиса, попроси {skill_name} …»."
-                ),
-            )
-        )
-        entries.append(
-            ConfigEntry(
-                key="label_rename_drift_moderation",
-                type=ConfigEntryType.LABEL,
-                label=(
-                    "  Yandex moderation: 5-15 min. Existing voice commands "
-                    "keep working during moderation."
-                ),
-            )
-        )
-
-    entries.append(
-        ConfigEntry(
-            key=CONF_ACTION_RENAME_DIALOG_SKILL,
-            type=ConfigEntryType.ACTION,
-            label="Rename skill in Yandex",
-            description=(
-                "Apply the current 'Skill name' value to the existing "
-                "skill in Yandex Dialogs (PATCH draft + re-deploy). "
-                "Uses the cached x_token — no re-authentication required."
-            ),
-            action=CONF_ACTION_RENAME_DIALOG_SKILL,
-            action_label="Apply rename",
-            required=False,
-            default_value="",
-        )
-    )
-
-    if drifted and artifacts.last_known_name:
-        entries.append(
-            ConfigEntry(
-                key=CONF_ACTION_REVERT_SKILL_NAME,
-                type=ConfigEntryType.ACTION,
-                label="Revert skill name",
-                description=(
-                    f"Discards your edit and restores «{artifacts.last_known_name}» "
-                    "into the Skill name field above. No Yandex API calls."
-                ),
-                action=CONF_ACTION_REVERT_SKILL_NAME,
-                action_label=f"Revert to «{artifacts.last_known_name}»",
-                required=False,
-                default_value="",
-            )
-        )
-
-    return tuple(entries)
-
-
-def _build_identity_card_entries(
-    artifacts: SkillCreationArtifacts,
-    webhook_secret: str,
-    external_base_url: str,
-    is_configured: bool,
-) -> tuple[ConfigEntry, ...]:
-    """Render a compact "identity card" once the skill is registered + on-air.
-
-    Webhook URL is exposed as a read-only STRING (selectable / copyable
-    from the input). The Yandex Dialogs dev console link is rendered as
-    an ACTION with ``help_link`` — that gives the user a clickable
-    button MA's frontend opens in a new tab.
-    """
-    if not is_configured or not artifacts.skill_id:
-        return ()
-
-    skill_label = artifacts.last_known_name or "(name unknown)"
-    dev_console_url = f"https://dialogs.yandex.ru/developer/skills/{artifacts.skill_id}"
-    # Webhook URL is constructed from external_base_url + webhook_secret
-    # but we no longer surface it here as a read-only field — the
-    # editable secret + base URL live in their own sections.
-    _ = external_base_url, webhook_secret
-    return (
-        ConfigEntry(
-            key="label_identity_card_header",
-            type=ConfigEntryType.LABEL,
-            label=f"✅ Configured: «{skill_label}» — Skill ID: {artifacts.skill_id}",
-        ),
-        ConfigEntry(
-            key="identity_card_dev_console_url",
-            type=ConfigEntryType.STRING,
-            label="Yandex Dialogs dev console",
-            description=(
-                "Copy this URL and open it in your browser to manage the "
-                "skill in the Yandex Dialogs developer console."
-            ),
-            required=False,
-            value=dev_console_url,
-            default_value="",
         ),
     )
 
@@ -810,10 +603,17 @@ async def get_config_entries(  # noqa: PLR0915
         webhook_secret = default_secret
         artifacts = SkillCreationArtifacts()
         values[CONF_DIALOG_SKILL_ID] = ""
-        update_message = (
-            "Webhook secret regenerated. Click 'Sign in to Yandex Passport' "
-            "to register a fresh skill against the new URL."
-        )
+        publication_status = ""
+        if cached_x_token:
+            update_message = (
+                "Webhook secret regenerated. Click 'Create skill' to register "
+                "a fresh skill against the new URL."
+            )
+        else:
+            update_message = (
+                "Webhook secret regenerated. Click 'Sign in to Yandex Passport' "
+                "to register a fresh skill against the new URL."
+            )
 
     elif action == CONF_ACTION_TEST_WEBHOOK:
         # Reachability probe — does Yandex's traffic actually land in our
