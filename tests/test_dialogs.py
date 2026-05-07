@@ -874,7 +874,7 @@ class TestDisambiguation:
     """End-to-end tests for the disambiguation prompt + pending-command replay."""
 
     async def test_multiple_matches_returns_disambiguation_prompt(self) -> None:
-        """Two candidates → response carries buttons + pending_command, end_session=False."""
+        """Two candidates on a screened surface → response carries buttons + pending_command."""
         track = MagicMock(uri="library://track/1", spec_set=["uri"])
         mass = _make_mass(
             [
@@ -885,6 +885,7 @@ class TestDisambiguation:
         )
         handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
         body = {
+            "meta": {"interfaces": {"screen": {}}},
             "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
             "request": {"command": "включи Metallica на кухне"},
         }
@@ -904,6 +905,33 @@ class TestDisambiguation:
         assert pending["candidate_ids"] == ["p1", "p2"]
         # Nothing is played yet.
         mass.player_queues.play_media.assert_not_awaited()
+
+    async def test_disambiguation_voice_only_omits_buttons(self) -> None:
+        """Voice-only surface (no meta.interfaces.screen) → prompt without buttons."""
+        track = MagicMock(uri="library://track/1", spec_set=["uri"])
+        mass = _make_mass(
+            [
+                MockPlayer(player_id="p1", name="Кухня большая"),
+                MockPlayer(player_id="p2", name="Кухня маленькая"),
+            ],
+            search_track=track,
+        )
+        handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
+        body = {
+            # No meta.interfaces — defaults to voice-only (Yandex Mini etc.)
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        assert resp.status == 200
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is False
+        # Voice prompt with ordinals is still present, just without buttons.
+        assert "buttons" not in body_out["response"]
+        assert "первая" in body_out["response"]["text"].lower()
+        # Pending command still saved for voice-ordinal resolution.
+        pending = body_out["session_state"]["pending_command"]
+        assert pending["candidate_ids"] == ["p1", "p2"]
 
     async def test_button_press_resolves_pending(self) -> None:
         """ButtonPressed payload.player_id triggers a play of the saved pending_command."""
@@ -1079,6 +1107,7 @@ class TestDisambiguation:
         )
         handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
         body = {
+            "meta": {"interfaces": {"screen": {}}},
             "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
             "request": {"command": "включи Metallica"},
         }
@@ -1152,6 +1181,7 @@ class TestDisambiguation:
         handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
         # Simulate the awaiting_query → ambiguous-resolution turn.
         body = {
+            "meta": {"interfaces": {"screen": {}}},
             "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
             "request": {"command": "Metallica на кухне"},
             "state": {"session": {"awaiting_query": True}},
@@ -1243,6 +1273,7 @@ class TestDisambiguation:
         )
         handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
         body = {
+            "meta": {"interfaces": {"screen": {}}},
             "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
             "request": {"command": "третья"},
             "state": {
@@ -1452,6 +1483,7 @@ class TestDisambiguation:
         )
         handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
         body = {
+            "meta": {"interfaces": {"screen": {}}},
             "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
             "request": {"command": "включи джаз"},
         }
