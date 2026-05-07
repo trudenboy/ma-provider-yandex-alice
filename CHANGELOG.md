@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-05-08
+
+### Fixed
+
+- **Device-flow popup `/status` 404 race**: the auth flow tore down
+  the `/yandex_alice/device_code/<id>/status` route 3 s after the
+  state flipped to `"done"`, but the popup HTML polls every 2.5 s
+  with an additional ~800 ms close timer — slow tabs / throttled
+  background windows / brief network hiccups landed their next poll
+  *after* the route was gone and saw repeated 404s instead of the
+  terminal `"done"` state. Replaced the synchronous unregister-in-
+  `finally` with `schedule_unregister_device_code_route(...)` which
+  schedules the teardown 30 s later via `mass.create_task`. The
+  `state_provider` closure (which the route handler reads) keeps
+  returning `"done"` / `"failed"` for the full window so the popup
+  always sees the terminal state and closes itself; the route is
+  reaped automatically afterwards. Also adds DEBUG logging of
+  register / unregister with `session_id` for future diagnostics.
+
+### Internal
+
+- Bumps `ya-dialogs-api>=2.1.1` (when published) — release 2.1.1
+  enriches `DialogsIntentValidationError.__str__` with the offending
+  `form_name` and error position, and adds per-intent INFO progress
+  in `set_intents`. The provider-side log line stays unchanged but
+  now points at which grammar in our 11-intent set tripped Yandex's
+  validator.
+
 ## [1.3.1] — 2026-05-07
 
 ### Fixed
