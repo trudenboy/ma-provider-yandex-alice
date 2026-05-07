@@ -231,6 +231,7 @@ def _yandex_number(entities: list[Any] | None) -> int | None:
             return int(value)
     return None
 
+
 # Seek forward / backward with numeric amount + optional unit. Unit defaults
 # to seconds when missing. "Минут[уы]" multiplies by 60.
 _SEEK_FORWARD_RE = re.compile(

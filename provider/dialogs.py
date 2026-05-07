@@ -122,7 +122,7 @@ def _tts_for(text: str) -> str:
         for phrase, replacement in PHRASE_REPLACEMENTS:
             idx = lowered.find(phrase)
             while idx != -1:
-                text = text[:idx] + replacement + text[idx + len(phrase):]
+                text = text[:idx] + replacement + text[idx + len(phrase) :]
                 lowered = text.lower()
                 idx = lowered.find(phrase, idx + len(replacement))
 
@@ -707,9 +707,7 @@ class DialogsWebhookHandler:
         # is empty (no grammar declared or no match).
         platform = parse_platform_intent(nlu_intents)
         if isinstance(platform, ParsedControl):
-            self._logger.debug(
-                "Platform intent → control %r (skipping regex parser)", platform
-            )
+            self._logger.debug("Platform intent → control %r (skipping regex parser)", platform)
             return self._handle_control(
                 session=session,
                 control=platform,
@@ -719,9 +717,7 @@ class DialogsWebhookHandler:
                 has_screen=has_screen,
             )
         if isinstance(platform, ParsedCommand):
-            self._logger.debug(
-                "Platform intent → play %r (skipping regex parser)", platform
-            )
+            self._logger.debug("Platform intent → play %r (skipping regex parser)", platform)
             return await self._dispatch_play(
                 session=session,
                 parsed=platform,
@@ -1173,9 +1169,7 @@ class DialogsWebhookHandler:
         # Stop is the natural session-end signal — even with voice
         # continuation enabled, "стоп / выключи" should hand the mic
         # back to the user instead of staying in the skill listening loop.
-        end_session = (
-            True if control.action == "stop" else not self._voice_continuation
-        )
+        end_session = True if control.action == "stop" else not self._voice_continuation
         return self._yandex_response(
             incoming_session=session,
             text=text,

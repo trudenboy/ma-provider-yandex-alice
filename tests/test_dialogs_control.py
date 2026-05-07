@@ -298,9 +298,7 @@ class TestParseControlVolumeRelative:
             ("на 0 тише", 0),
         ],
     )
-    def test_zero_magnitude_passes_through_as_zero(
-        self, phrase: str, expected_value: int
-    ) -> None:
+    def test_zero_magnitude_passes_through_as_zero(self, phrase: str, expected_value: int) -> None:
         """Zero magnitude is preserved (not promoted to ±1) — Copilot review on PR #18."""
         result = parse_control(phrase)
         assert result is not None
@@ -491,9 +489,7 @@ class TestExecuteControl:
         mass = self._make_mass()
         player = self._player()
         player.volume_level = 40
-        await execute_control(
-            mass, ParsedControl(action="volume_relative", value=20), player
-        )
+        await execute_control(mass, ParsedControl(action="volume_relative", value=20), player)
         mass.players.cmd_volume_set.assert_awaited_once_with("p1", 60)
 
     async def test_volume_relative_decrease(self) -> None:
@@ -501,9 +497,7 @@ class TestExecuteControl:
         mass = self._make_mass()
         player = self._player()
         player.volume_level = 70
-        await execute_control(
-            mass, ParsedControl(action="volume_relative", value=-15), player
-        )
+        await execute_control(mass, ParsedControl(action="volume_relative", value=-15), player)
         mass.players.cmd_volume_set.assert_awaited_once_with("p1", 55)
 
     async def test_volume_relative_clamps_high(self) -> None:
@@ -511,9 +505,7 @@ class TestExecuteControl:
         mass = self._make_mass()
         player = self._player()
         player.volume_level = 90
-        await execute_control(
-            mass, ParsedControl(action="volume_relative", value=50), player
-        )
+        await execute_control(mass, ParsedControl(action="volume_relative", value=50), player)
         mass.players.cmd_volume_set.assert_awaited_once_with("p1", 100)
 
     async def test_volume_relative_clamps_low(self) -> None:
@@ -521,9 +513,7 @@ class TestExecuteControl:
         mass = self._make_mass()
         player = self._player()
         player.volume_level = 5
-        await execute_control(
-            mass, ParsedControl(action="volume_relative", value=-30), player
-        )
+        await execute_control(mass, ParsedControl(action="volume_relative", value=-30), player)
         mass.players.cmd_volume_set.assert_awaited_once_with("p1", 0)
 
     async def test_volume_relative_missing_volume_level_uses_default(self) -> None:
@@ -532,9 +522,7 @@ class TestExecuteControl:
         player = self._player()
         # Explicitly drop volume_level so getattr returns None.
         del player.volume_level
-        await execute_control(
-            mass, ParsedControl(action="volume_relative", value=10), player
-        )
+        await execute_control(mass, ParsedControl(action="volume_relative", value=10), player)
         mass.players.cmd_volume_set.assert_awaited_once_with("p1", 60)
 
     async def test_mute(self) -> None:
