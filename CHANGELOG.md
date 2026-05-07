@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-05-07
+
+### Fixed
+
+- **HA add-on ingress**: the device-code page URL handed to the
+  `AuthenticationHelper` popup was a path-from-root
+  (`/yandex_alice/device_code/<id>`), so a browser sitting on the
+  Home Assistant ingress URL `https://<host>/<addon-slug>/`
+  resolved it against the origin and dropped the add-on prefix —
+  the popup landed on `https://<host>/yandex_alice/device_code/<id>`
+  (404). Both the popup URL and the in-page status-poll URL are
+  now built from `mass.webserver.base_url`, which already includes
+  the ingress prefix in HA add-on mode (matches the pattern used
+  by the `yandex_music` provider's Device Flow auth page).
+
 ## [1.2.2] — 2026-05-07
 
 ### Fixed
