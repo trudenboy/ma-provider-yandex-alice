@@ -7,6 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-05-07
+
+Maximum-integration release for Yandex Dialogs platform features (Phases
+0–2 of `docs/NLU_RESEARCH.md`). Six commits delivered on
+`feat/platform-integration` and merged via PR
+[#18](https://github.com/trudenboy/ma-provider-yandex-alice/pull/18).
+
+### Added
+
+- **Platform NLU consumption (Phase 0).** Read the rest of the Yandex
+  Dialogs request envelope:
+    - `meta.interfaces.screen` gates `buttons` emission so voice-only
+      surfaces (Mini, Pro) get the same ordinal-based prompt without
+      button payload.
+    - `request.markup.dangerous_context` short-circuits with a generic
+      "Не понял команду" + `end_session=true`; flagged content never
+      lands in `mass.music.search`.
+    - `request.nlu.entities[YANDEX.NUMBER]` feeds a new
+      `volume_relative` `ParsedControl` action: «прибавь на 20» / «убавь
+      5» / «на 15 громче» reads current volume, applies signed delta,
+      clamps `[0, 100]`, dispatches `cmd_volume_set`.
+    - `request.original_utterance` logged alongside the normalised
+      `command` for misclassification post-mortems (DEBUG only).
+
+- **Response polish for screened surfaces (Phase 1).**
+    - `card` parameter plumbed through `_yandex_response` (BigImage /
+      ItemsList / ImageGallery shapes documented; emission deferred to
+      Phase 1.5 — needs separate image-upload infrastructure).
+    - Suggestion buttons (Следующая / Пауза / Громче / Тише) appended
+      to play- and control-success responses on screened surfaces.
+    - `provider/tts_dictionary.py` carries ~26 single-word foreign
+      artist transliterations (Metallica → мет+аллика, Coldplay →
+      к+олдплей, …) plus 16 multi-word phrases (Iron Maiden, Pink
+      Floyd, …); `_tts_for` now matches both Latin and Cyrillic words
+      so foreign band names get pronounced correctly while `text`
+      stays clean.
+    - `voice_continuation` opt-in toggle (`CONF_DIALOG_VOICE_CONTINUATION`,
+      default off): when enabled, play- and control-success responses
+      keep the conversation open. `стоп / останови / выключи` always
+      close the session.
+
+- **Custom-intent grammar (Phase 2).** Eleven grammars declared on the
+  skill and dispatched at runtime via `request.nlu.intents`:
+    - `control.{pause, resume, next, previous, stop, volume_up,
+      volume_down, shuffle_on, shuffle_off, now_playing}`
+    - `play.my_wave`
+    - Each carries `positiveTests` for the dev-console "Протестировать"
+      button and uses `%lemma` directives to absorb morphology.
+    - Yandex's built-in `YANDEX.REJECT` (cancel pending prompt) and
+      `YANDEX.HELP` (contextual hint) are unlocked automatically once
+      any custom grammar is declared and now have runtime handlers.
+    - Regex parsers (`parse_command` / `parse_control`) remain as the
+      fallback when `request.nlu.intents` is empty — purely additive
+      coverage, no regression risk.
+    - Bumps `ya-dialogs-api==2.1.0` for the new `IntentDraft` API and
+      `set_intents` diff-based sync.
+
+- **Root `CLAUDE.md`** aligned with upstream Music Assistant
+  `CLAUDE.md` — Sphinx-style docstrings, sync workflow, network-input
+  validation contract, debugging notes.
+
+### Fixed
+
+- **Webhook handler error handling**: post-auth dispatch is now wrapped
+  in `try / except` so a parser / resolver / MA-dispatch raise surfaces
+  as a Russian fallback ("Что-то пошло не так. Попробуй ещё раз.")
+  instead of HTTP 500 → Alice silence. Flagged in upstream
+  [music-assistant/server#3843](https://github.com/music-assistant/server/pull/3843)
+  by [@chrisuthe](https://github.com/chrisuthe).
+- **Docstring style**: six existing Google-style docstrings (`Args:` /
+  `Raises:` / `Returns:`) converted to Sphinx-style (`:param:` /
+  `:raises:` / `:returns:`) per the upstream `CLAUDE.md` convention.
+  Flagged in the same upstream review.
+
+### Fixed (review on PR [#18](https://github.com/trudenboy/ma-provider-yandex-alice/pull/18))
+
+- **Logs no longer leak flagged content.** When
+  `request.markup.dangerous_context=true`, the structured "Webhook recv"
+  DEBUG log was still emitting the `command` and `original_utterance`
+  fields *before* the refusal branch ran. Both are now redacted to
+  `<redacted: dangerous_context>` so flagged phrases never reach
+  `$HOME/.musicassistant/musicassistant.log`. Found by Copilot
+  ([#18 thread](https://github.com/trudenboy/ma-provider-yandex-alice/pull/18#discussion_r3204562269)).
+- **`volume_relative` magnitude clamp accepts zero.** Previously
+  `max(1, …)` silently promoted "прибавь на 0" to a +1 bump. The
+  clamp is now `max(0, …)` so the parsed delta matches the spoken
+  number — `0` becomes a no-op rather than an unwanted volume change.
+  Found by Copilot
+  ([#18 thread](https://github.com/trudenboy/ma-provider-yandex-alice/pull/18#discussion_r3204562328)).
+- **`CONF_DIALOG_VOICE_CONTINUATION` comment accuracy.** The doc-comment
+  promised that "спасибо" closes the session via the `stop` control
+  intent, but `parse_control` does not match it. Comment corrected to
+  the actual matched phrases: «стоп / останови / выключи / выключи
+  музыку». Found by Copilot
+  ([#18 thread](https://github.com/trudenboy/ma-provider-yandex-alice/pull/18#discussion_r3204562358)).
+
+### Internal
+
+- 466 unit tests (was 411). Coverage spans every new code path
+  including the dangerous-content log redaction, zero-magnitude
+  volume parse, suggestion-button gating, voice-continuation toggle,
+  platform-intent dispatch, REJECT / HELP handlers, and the
+  webhook-error-recovery fallback.
+- `pyproject.toml`: `codespell` ignores `sting` (the artist Стинг in
+  `tts_dictionary.py`, not a typo of `string`).
+
 ## [1.2.3] — 2026-05-07
 
 ### Fixed
