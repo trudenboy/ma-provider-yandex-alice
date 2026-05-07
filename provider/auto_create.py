@@ -34,6 +34,7 @@ from enum import StrEnum
 from typing import Any
 
 from ya_dialogs_api import (
+    DialogsSkillCreator,
     SkillCreationArtifacts,
     SkillCreationState,
     auto_create_skill,
@@ -44,7 +45,11 @@ from ya_passport_auth.exceptions import (
     InvalidCredentialsError,
 )
 
-from .auth_session import make_cached_authenticator, passport_client_session
+from .auth_session import (
+    cached_authenticated_session,
+    make_cached_authenticator,
+    passport_client_session,
+)
 from .constants import DIALOG_CHANNEL
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,6 +57,8 @@ _LOGGER = logging.getLogger(__name__)
 __all__ = [
     "AutoCreateOutcome",
     "LocalAutoCreateStage",
+    "adopt_existing_skill",
+    "delete_existing_skill_then_recreate",
     "deserialize_device_session",
     "run_auto_create_step",
     "serialize_device_session",
@@ -71,6 +78,7 @@ class LocalAutoCreateStage(StrEnum):
     IDLE = "idle"
     DEVICE_FLOW_STARTED = "device_flow_started"
     PIPELINE_RUNNING = "pipeline_running"
+    DUPLICATE_DETECTED = "duplicate_detected"
     DONE = "done"
     FAILED = "failed"
 
@@ -106,6 +114,18 @@ class AutoCreateOutcome:
 
     stage: LocalAutoCreateStage
     """High-level UX stage — drives button label + cancel visibility."""
+
+    pending_duplicate_skill_id: str | None = None
+    """skill_id of a pre-existing same-name skill found by the duplicate
+    pre-check. Non-None signals ``stage=DUPLICATE_DETECTED``; the
+    dispatcher persists this in a hidden config entry so the next render
+    shows the Recreate / Adopt resolution UI."""
+
+    pending_duplicate_skill_name: str | None = None
+    """Display name of the duplicate skill (as registered in Yandex).
+    May differ from the user's current Skill name field by case alone;
+    we surface the canonical Yandex spelling to make the conflict
+    obvious."""
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +425,46 @@ async def _resume_device_flow(
     )
 
 
+async def _pre_check_duplicate(
+    cached_x_token: str,
+    skill_name: str,
+) -> tuple[str, str] | None:
+    """Probe Yandex for an existing skill with the same name (case-insensitive).
+
+    Returns ``(skill_id, registered_name)`` or ``None`` if no match. Any
+    exception is logged and treated as "no match" — the duplicate check
+    is best-effort guidance, not a hard gate; if Yandex is flaky we let
+    ``auto_create_skill`` proceed and surface its own
+    ``DialogsDuplicateSkillError`` from there.
+    """
+    target = skill_name.strip().casefold()
+    if not target:
+        return None
+    try:
+        async with cached_authenticated_session(cached_x_token) as session:
+            creator = DialogsSkillCreator(session, channel=DIALOG_CHANNEL)
+            csrf = await creator.fetch_csrf()
+            skills = await creator.list_existing_skills(csrf)
+    except Exception as exc:
+        _LOGGER.debug("auto-create: duplicate pre-check failed: %r", exc)
+        return None
+    for entry in skills:
+        # Yandex's snapshot endpoint exposes the user-visible name under
+        # either "appName" or "name" depending on locale; channel filter
+        # is informational — we already restricted via the channel kwarg
+        # on the API client.
+        candidate = (
+            str(entry.get("appName") or entry.get("name") or "").strip()
+        )
+        if not candidate:
+            continue
+        if candidate.casefold() == target:
+            sid = str(entry.get("id") or entry.get("skill_id") or "").strip()
+            if sid:
+                return (sid, candidate)
+    return None
+
+
 async def _run_pipeline(
     *,
     cached_x_token: str,
@@ -414,6 +474,7 @@ async def _run_pipeline(
     structured_examples: list[dict[str, Any]] | None,
     activation_phrases: list[str] | None,
     artifacts: SkillCreationArtifacts,
+    skip_duplicate_check: bool = False,
 ) -> AutoCreateOutcome:
     """Run the OAuth-free aliceSkill pipeline end-to-end on cached cookies.
 
@@ -433,7 +494,32 @@ async def _run_pipeline(
        starts). We translate it into ``outcome.x_token=""`` so the
        dispatcher clears the cache and the next click can re-auth
        cleanly via Device Flow.
+
+    Before the create_app step (i.e. when ``artifacts.state == NONE``)
+    we run a duplicate-name pre-check against the user's existing
+    skills and short-circuit into ``DUPLICATE_DETECTED`` if a match is
+    found. Bypass with ``skip_duplicate_check=True`` (used by the
+    Recreate / Adopt resumption paths).
     """
+    if not skip_duplicate_check and artifacts.state == SkillCreationState.NONE:
+        duplicate = await _pre_check_duplicate(cached_x_token, skill_name)
+        if duplicate is not None:
+            existing_id, existing_name = duplicate
+            return AutoCreateOutcome(
+                artifacts=artifacts,
+                device_session_blob=None,
+                x_token=None,
+                user_code=None,
+                verification_url=None,
+                user_message=(
+                    f"A skill named «{existing_name}» already exists in your "
+                    "Yandex Dialogs account. Choose Recreate or Adopt below."
+                ),
+                stage=LocalAutoCreateStage.DUPLICATE_DETECTED,
+                pending_duplicate_skill_id=existing_id,
+                pending_duplicate_skill_name=existing_name,
+            )
+
     authenticator = make_cached_authenticator(cached_x_token)
 
     try:
@@ -506,4 +592,93 @@ def _outcome_from_failed_pipeline(result: SkillCreationArtifacts) -> AutoCreateO
         verification_url=None,
         user_message=msg,
         stage=LocalAutoCreateStage.FAILED,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-resolution helpers (Step 2: Recreate / Adopt)
+# ---------------------------------------------------------------------------
+
+
+async def adopt_existing_skill(
+    *,
+    cached_x_token: str,
+    skill_name: str,
+    backend_uri: str,
+    description: str,
+    structured_examples: list[dict[str, Any]] | None,
+    activation_phrases: list[str] | None,
+    existing_skill_id: str,
+) -> AutoCreateOutcome:
+    """Re-deploy an existing skill against this MA's webhook URL.
+
+    Pre-positions ``artifacts`` to ``APP_CREATED`` (with the discovered
+    ``skill_id``) so ``auto_create_skill`` skips the create_app step
+    and runs ``upload_logo → update_draft → request_deploy`` against
+    the existing skill instead. The library is idempotent on each
+    sub-step, so adopting an already-on-air skill is safe.
+    """
+    artifacts = SkillCreationArtifacts(
+        state=SkillCreationState.APP_CREATED,
+        skill_id=existing_skill_id,
+    )
+    return await _run_pipeline(
+        cached_x_token=cached_x_token,
+        skill_name=skill_name,
+        backend_uri=backend_uri,
+        description=description,
+        structured_examples=structured_examples,
+        activation_phrases=activation_phrases,
+        artifacts=artifacts,
+        skip_duplicate_check=True,
+    )
+
+
+async def delete_existing_skill_then_recreate(
+    *,
+    cached_x_token: str,
+    skill_name: str,
+    backend_uri: str,
+    description: str,
+    structured_examples: list[dict[str, Any]] | None,
+    activation_phrases: list[str] | None,
+    existing_skill_id: str,
+) -> AutoCreateOutcome:
+    """Delete the duplicate skill in Yandex, then run a fresh pipeline.
+
+    The deletion uses ``DialogsSkillCreator.delete_skill``; on any
+    failure we surface a FAILED outcome with the original error
+    rather than charging ahead and hitting a duplicate-name 4xx on
+    create_app.
+    """
+    try:
+        async with cached_authenticated_session(cached_x_token) as session:
+            creator = DialogsSkillCreator(session, channel=DIALOG_CHANNEL)
+            csrf = await creator.fetch_csrf()
+            await creator.delete_skill(csrf, existing_skill_id)
+    except Exception as exc:
+        _LOGGER.exception("auto-create: delete_skill failed (skill_id=%s)", existing_skill_id)
+        failed = SkillCreationArtifacts(
+            state=SkillCreationState.FAILED,
+            last_error=f"Failed to delete the existing skill: {exc!r}",
+        )
+        return AutoCreateOutcome(
+            artifacts=failed,
+            device_session_blob=None,
+            x_token=None,
+            user_code=None,
+            verification_url=None,
+            user_message=str(failed.last_error),
+            stage=LocalAutoCreateStage.FAILED,
+        )
+
+    return await _run_pipeline(
+        cached_x_token=cached_x_token,
+        skill_name=skill_name,
+        backend_uri=backend_uri,
+        description=description,
+        structured_examples=structured_examples,
+        activation_phrases=activation_phrases,
+        artifacts=SkillCreationArtifacts(),
+        skip_duplicate_check=True,
     )

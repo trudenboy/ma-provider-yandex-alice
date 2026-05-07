@@ -47,10 +47,8 @@ def _make_mass() -> MagicMock:
     return mass
 
 
-@pytest.fixture(autouse=True)
-def _stub_playlists(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty playlist options for all tests in this module."""
-    monkeypatch.setattr(yandex_alice, "fetch_playlist_options", AsyncMock(return_value=[]))
+# v1.2.0: removed CONF_EXPOSED_PLAYLISTS — fetch_playlist_options no longer
+# imported. The autouse fixture that used to stub it is gone too.
 
 
 def _entries_by_key(entries: tuple[Any, ...]) -> dict[str, Any]:
@@ -503,9 +501,10 @@ class TestDeviceFlowStartedHintOnReload:
         entries = await get_config_entries(_make_mass(), values=values)
         keys = _entries_by_key(entries)
 
-        # v1.2.0 #6+#7: Device Flow LABELs split into multiple entries; the
-        # user_code lands in step2 LABEL, the verification_url in step1.
-        assert "label_auto_create_device_flow_step1" in keys
-        assert "label_auto_create_device_flow_step2" in keys
-        assert "ya.ru/device" in keys["label_auto_create_device_flow_step1"].label
-        assert "WXYZ-1234" in keys["label_auto_create_device_flow_step2"].label
+        # v1.2.0 3-step UX: Step 1 (Authenticate) section shows Device
+        # Flow code + URL across multiple LABELs; verification_url lands
+        # in step1, the user_code in step2.
+        assert "label_step1_devflow_step1" in keys
+        assert "label_step1_devflow_step2" in keys
+        assert "ya.ru/device" in keys["label_step1_devflow_step1"].label
+        assert "WXYZ-1234" in keys["label_step1_devflow_step2"].label

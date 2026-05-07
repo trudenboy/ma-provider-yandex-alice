@@ -34,6 +34,8 @@ from ya_dialogs_api import (
 from .auto_create import (
     AutoCreateOutcome,
     LocalAutoCreateStage,
+    adopt_existing_skill,
+    delete_existing_skill_then_recreate,
     deserialize_device_session,
     run_auto_create_step,
 )
@@ -43,28 +45,37 @@ from .constants import (
     CATEGORY_ADVANCED,
     CATEGORY_SETUP,
     CATEGORY_VOICE,
+    CONF_ACTION_ADOPT_EXISTING,
     CONF_ACTION_AUTO_CREATE_DIALOG,
     CONF_ACTION_CANCEL_DIALOG_SKILL_FLOW,
+    CONF_ACTION_CANCEL_EDIT,
+    CONF_ACTION_EDIT_SKILL,
+    CONF_ACTION_RECREATE_DUPLICATE,
     CONF_ACTION_REGENERATE_WEBHOOK_SECRET,
     CONF_ACTION_RENAME_DIALOG_SKILL,
     CONF_ACTION_REVERT_SKILL_NAME,
     CONF_ACTION_TEST_WEBHOOK,
+    CONF_ACTION_UPDATE_SKILL,
     CONF_AUTH_X_TOKEN,
+    CONF_DIALOG_ACTIVATION_PHRASES,
     CONF_DIALOG_AUTO_CREATE_ARTIFACTS,
     CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION,
-    CONF_DIALOG_SKILL_ENABLED,
     CONF_DIALOG_SKILL_ID,
     CONF_DIALOG_SKILL_NAME,
     CONF_DIALOG_SKILL_TOKEN,
+    CONF_DIALOG_SKILL_VOICE,
     CONF_DIALOG_WEBHOOK_SECRET,
+    CONF_EDIT_MODE,
     CONF_EXPOSED_PLAYERS,
-    CONF_EXPOSED_PLAYLISTS,
     CONF_EXTERNAL_BASE_URL,
     CONF_INSTANCE_NAME,
+    CONF_PENDING_DUPLICATE_SKILL_ID,
+    CONF_PENDING_DUPLICATE_SKILL_NAME,
     CONF_USE_DIFFERENT_INSTANCE_NAME,
     DIALOG_DEFAULT_NAME,
     DIALOG_NAME_MAX_LEN,
     DIALOG_NAME_MIN_LEN,
+    DIALOG_VOICE_DEFAULT,
     DIALOG_WEBHOOK_BASE_PATH,
     YANDEX_DIALOGS_DEVELOPER_URL,
 )
@@ -75,7 +86,6 @@ from .dialog_skill_meta import (
     build_structured_examples,
     validate_skill_name,
 )
-from .playlists import fetch_playlist_options
 from .plugin import YandexAlicePlugin
 from .url_helpers import is_public_https_url, try_detect_public_https_url
 from .webhook_probe import probe_webhook_reachability
@@ -534,6 +544,102 @@ async def get_config_entries(  # noqa: PLR0915
                 artifacts=artifacts,
             )
 
+    elif action == CONF_ACTION_RECREATE_DUPLICATE:
+        existing_id = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_ID).strip()
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            update_message = str(exc)
+        else:
+            if not existing_id or not cached_x_token:
+                update_message = (
+                    "Recreate is only available when an existing skill has "
+                    "been detected. Click 'Create skill' first."
+                )
+            else:
+                action_outcome = await delete_existing_skill_then_recreate(
+                    cached_x_token=cached_x_token,
+                    skill_name=skill_name,
+                    backend_uri=backend_uri,
+                    description=build_skill_description(skill_name),
+                    structured_examples=build_structured_examples(skill_name),
+                    activation_phrases=build_activation_phrases(skill_name),
+                    existing_skill_id=existing_id,
+                )
+                values[CONF_PENDING_DUPLICATE_SKILL_ID] = ""
+                values[CONF_PENDING_DUPLICATE_SKILL_NAME] = ""
+
+    elif action == CONF_ACTION_ADOPT_EXISTING:
+        existing_id = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_ID).strip()
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            update_message = str(exc)
+        else:
+            if not existing_id or not cached_x_token:
+                update_message = (
+                    "Adopt is only available when an existing skill has been "
+                    "detected. Click 'Create skill' first."
+                )
+            else:
+                action_outcome = await adopt_existing_skill(
+                    cached_x_token=cached_x_token,
+                    skill_name=skill_name,
+                    backend_uri=backend_uri,
+                    description=build_skill_description(skill_name),
+                    structured_examples=build_structured_examples(skill_name),
+                    activation_phrases=build_activation_phrases(skill_name),
+                    existing_skill_id=existing_id,
+                )
+                values[CONF_PENDING_DUPLICATE_SKILL_ID] = ""
+                values[CONF_PENDING_DUPLICATE_SKILL_NAME] = ""
+
+    elif action == CONF_ACTION_EDIT_SKILL:
+        # Toggle edit mode on; render path picks it up via CONF_EDIT_MODE.
+        values[CONF_EDIT_MODE] = True
+
+    elif action == CONF_ACTION_CANCEL_EDIT:
+        # Drop edit mode; user-edited values for activation_phrases/voice
+        # are kept in the form but not pushed to Yandex until Update.
+        values[CONF_EDIT_MODE] = False
+
+    elif action == CONF_ACTION_UPDATE_SKILL:
+        # Edit-mode commit — pushes user-edited activation_phrases / voice
+        # to Yandex via the same auto_update_skill path used by Rename.
+        edited_phrases_raw = str(values.get(CONF_DIALOG_ACTIVATION_PHRASES) or "").strip()
+        if edited_phrases_raw:
+            edited_phrases: list[str] | None = [
+                line.strip() for line in edited_phrases_raw.splitlines() if line.strip()
+            ]
+            if not edited_phrases:
+                edited_phrases = build_activation_phrases(skill_name)
+        else:
+            edited_phrases = build_activation_phrases(skill_name)
+        edited_voice = (
+            str(values.get(CONF_DIALOG_SKILL_VOICE) or "").strip() or DIALOG_VOICE_DEFAULT
+        )
+
+        try:
+            backend_uri = build_backend_uri(external_base_url, webhook_secret)
+        except ValueError as exc:
+            update_message = str(exc)
+        else:
+            update_outcome = await run_auto_update(
+                cached_x_token=cached_x_token or None,
+                skill_name=skill_name,
+                backend_uri=backend_uri,
+                description=build_skill_description(skill_name),
+                structured_examples=build_structured_examples(skill_name),
+                activation_phrases=edited_phrases,
+                voice=edited_voice,
+                artifacts=artifacts,
+            )
+            artifacts = update_outcome.artifacts
+            update_message = update_outcome.user_message
+            if update_outcome.x_token == "":
+                cached_x_token = ""
+            values[CONF_EDIT_MODE] = False
+
     elif action == CONF_ACTION_RENAME_DIALOG_SKILL:
         try:
             backend_uri = build_backend_uri(external_base_url, webhook_secret)
@@ -611,28 +717,32 @@ async def get_config_entries(  # noqa: PLR0915
             device_session_blob = ""
         if action_outcome.x_token is not None:
             cached_x_token = action_outcome.x_token
+        # Surface duplicate-name pre-check result into hidden form values
+        # so the next render shows the Recreate / Adopt resolution UI.
+        if action_outcome.stage == LocalAutoCreateStage.DUPLICATE_DETECTED:
+            values[CONF_PENDING_DUPLICATE_SKILL_ID] = (
+                action_outcome.pending_duplicate_skill_id or ""
+            )
+            values[CONF_PENDING_DUPLICATE_SKILL_NAME] = (
+                action_outcome.pending_duplicate_skill_name or ""
+            )
+        elif action_outcome.stage in (
+            LocalAutoCreateStage.DONE,
+            LocalAutoCreateStage.FAILED,
+        ):
+            values[CONF_PENDING_DUPLICATE_SKILL_ID] = ""
+            values[CONF_PENDING_DUPLICATE_SKILL_NAME] = ""
 
     values[CONF_DIALOG_AUTO_CREATE_ARTIFACTS] = dump_artifacts(artifacts)
     values[CONF_AUTH_X_TOKEN] = cached_x_token
     values[CONF_DIALOG_AUTO_CREATE_DEVICE_SESSION] = device_session_blob
     if artifacts.state == SkillCreationState.DONE and artifacts.skill_id:
         values[CONF_DIALOG_SKILL_ID] = artifacts.skill_id
-        # Auto-enable voice control on first DONE — the user has just been
-        # through the whole flow, leaving the skill disabled afterwards is
-        # confusing UX (#2). Power users can still flip it off in the form
-        # afterwards.
-        if not values.get(CONF_DIALOG_SKILL_ENABLED):
-            values[CONF_DIALOG_SKILL_ENABLED] = True
 
     is_configured = artifacts.state == SkillCreationState.DONE and bool(artifacts.skill_id)
 
-    # ---- Player / playlist options ----
+    # ---- Player options for voice exposure ----
     player_options = await _list_player_options(mass)
-    try:
-        playlist_options = await fetch_playlist_options(mass)
-    except Exception as exc:
-        _LOGGER.debug("could not enumerate playlists: %s", exc)
-        playlist_options = []
 
     # ---- External base URL: autodetect (#8) + inline HTTPS warning ----
     user_supplied_base_url = str(values.get(CONF_EXTERNAL_BASE_URL) or "").strip()
@@ -677,6 +787,12 @@ async def get_config_entries(  # noqa: PLR0915
             pending_verification_url = decoded[0].verification_url
             pending_expires_at_epoch = decoded[1]
 
+    duplicate_skill_id = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_ID).strip()
+    duplicate_skill_name = _resolve_saved_value(values, CONF_PENDING_DUPLICATE_SKILL_NAME).strip()
+    edit_mode = bool(values.get(CONF_EDIT_MODE, False))
+    activation_phrases_value = _resolve_saved_value(values, CONF_DIALOG_ACTIVATION_PHRASES)
+    voice_value = _resolve_saved_value(values, CONF_DIALOG_SKILL_VOICE) or DIALOG_VOICE_DEFAULT
+
     auto_create_entries = build_auto_create_entries(
         artifacts=artifacts,
         pending_session_present=bool(device_session_blob),
@@ -685,7 +801,15 @@ async def get_config_entries(  # noqa: PLR0915
         pending_user_code=pending_user_code,
         pending_verification_url=pending_verification_url,
         pending_expires_at_epoch=pending_expires_at_epoch,
-        skill_name_for_examples=skill_name,
+        auth_helper_url=None,
+        duplicate_skill_id=duplicate_skill_id or None,
+        duplicate_skill_name=duplicate_skill_name or None,
+        edit_mode=edit_mode,
+        skill_name=skill_name,
+        activation_phrases=activation_phrases_value,
+        voice=voice_value,
+        update_message=update_message,
+        last_error=None,
     )
 
     # ---- Rename cluster: drift LABELs (preview + #13 revert) + Rename ACTION ----
@@ -723,6 +847,52 @@ async def get_config_entries(  # noqa: PLR0915
             description="Persisted during DEVICE_FLOW_STARTED stage.",
             required=False,
             default_value=device_session_blob,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_PENDING_DUPLICATE_SKILL_ID,
+            type=ConfigEntryType.STRING,
+            label="Pending duplicate skill_id",
+            description="Persisted between clicks when the duplicate-name "
+            "pre-check finds a same-name skill in the user's account.",
+            required=False,
+            default_value=duplicate_skill_id,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_PENDING_DUPLICATE_SKILL_NAME,
+            type=ConfigEntryType.STRING,
+            label="Pending duplicate skill name",
+            description="Display name of the duplicate skill (Yandex spelling).",
+            required=False,
+            default_value=duplicate_skill_name,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_EDIT_MODE,
+            type=ConfigEntryType.BOOLEAN,
+            label="Edit mode",
+            description="Reveals editable activation phrases / voice fields in Step 3.",
+            required=False,
+            default_value=edit_mode,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_DIALOG_ACTIVATION_PHRASES,
+            type=ConfigEntryType.STRING,
+            label="Activation phrases (edit mode)",
+            description="Pushed to Yandex on 'Update skill' (Step 3 edit mode).",
+            required=False,
+            default_value=activation_phrases_value,
+            hidden=True,
+        ),
+        ConfigEntry(
+            key=CONF_DIALOG_SKILL_VOICE,
+            type=ConfigEntryType.STRING,
+            label="TTS voice (edit mode)",
+            description="Pushed to Yandex on 'Update skill' (Step 3 edit mode).",
+            required=False,
+            default_value=voice_value,
             hidden=True,
         ),
     )
@@ -799,7 +969,7 @@ async def get_config_entries(  # noqa: PLR0915
             type=ConfigEntryType.STRING,
             label="Voice-controllable players",
             description=(
-                "Players the skill is allowed to control. Leave empty to "
+                "Players Alice is allowed to control. Leave empty to "
                 "expose all players known to MA — Alice will then accept "
                 "voice commands for any player by name."
             ),
@@ -807,33 +977,6 @@ async def get_config_entries(  # noqa: PLR0915
             options=player_options,
             required=False,
             default_value=[],
-            category=CATEGORY_VOICE,
-        ),
-        ConfigEntry(
-            key=CONF_EXPOSED_PLAYLISTS,
-            type=ConfigEntryType.STRING,
-            label="Voice-addressable playlists",
-            description=(
-                "Optional curated list of playlists the user can ask for by "
-                "name. Leave empty for full library search."
-            ),
-            multi_value=True,
-            options=playlist_options,
-            required=False,
-            default_value=[],
-            category=CATEGORY_VOICE,
-        ),
-        ConfigEntry(
-            key=CONF_DIALOG_SKILL_ENABLED,
-            type=ConfigEntryType.BOOLEAN,
-            label="Enable voice control",
-            description=(
-                "Turn off to temporarily mute the skill (the webhook stops "
-                "responding to Yandex). Auto-enabled after a successful "
-                "skill creation."
-            ),
-            required=False,
-            default_value=False,
             category=CATEGORY_VOICE,
         ),
         # ===== Advanced section =====

@@ -21,7 +21,6 @@ CONF_INSTANCE_NAME = "instance_name"
 # HTTPS URL only to Yandex via a reverse proxy.
 CONF_EXTERNAL_BASE_URL = "external_base_url"
 CONF_EXPOSED_PLAYERS = "exposed_players"
-CONF_EXPOSED_PLAYLISTS = "exposed_playlists"
 
 # Cached Yandex Passport x_token from the first successful Device Flow.
 # Reused on subsequent auto-create / rename runs so the user doesn't have
@@ -30,7 +29,6 @@ CONF_EXPOSED_PLAYLISTS = "exposed_playlists"
 CONF_AUTH_X_TOKEN = "auth_x_token"
 
 # Dialog skill (Yandex Dialogs custom skill — voice playback)
-CONF_DIALOG_SKILL_ENABLED = "dialog_skill_enabled"
 CONF_DIALOG_SKILL_NAME = "dialog_skill_name"
 CONF_DIALOG_SKILL_ID = "dialog_skill_id"
 CONF_DIALOG_SKILL_TOKEN = "dialog_skill_token"
@@ -59,11 +57,53 @@ CONF_ACTION_REGENERATE_WEBHOOK_SECRET = "regenerate_webhook_secret"
 # Revert Skill name back to artifacts.last_known_name (drift undo).
 CONF_ACTION_REVERT_SKILL_NAME = "revert_skill_name"
 
+# v1.2.0 Step 2: pre-check duplicate name flow — two resolution actions.
+# RECREATE: delete the existing skill in Yandex + register fresh one with
+# the same name. ADOPT: skip create, position artifacts on the discovered
+# skill_id and continue the pipeline (re-deploys with our backend URL).
+CONF_ACTION_RECREATE_DUPLICATE = "recreate_duplicate"
+CONF_ACTION_ADOPT_EXISTING = "adopt_existing"
+# Hidden persistence: skill_id of the duplicate found by the pre-check
+# during the previous click. When non-empty, the form renders the
+# Recreate / Adopt resolution UI instead of the regular Create button.
+CONF_PENDING_DUPLICATE_SKILL_ID = "pending_duplicate_skill_id"
+CONF_PENDING_DUPLICATE_SKILL_NAME = "pending_duplicate_skill_name"
+
+# v1.2.0 Step 3: edit-mode toggle + actions. Edit mode is a hidden boolean
+# in form values; flipping it in/out reshapes the post-DONE section.
+CONF_EDIT_MODE = "edit_mode"
+CONF_ACTION_EDIT_SKILL = "edit_skill"
+CONF_ACTION_UPDATE_SKILL = "update_skill"
+CONF_ACTION_CANCEL_EDIT = "cancel_edit"
+
+# Voice + activation phrases editable in edit mode (otherwise auto-derived).
+CONF_DIALOG_SKILL_VOICE = "dialog_skill_voice"
+CONF_DIALOG_ACTIVATION_PHRASES = "dialog_activation_phrases"
+
 # Toggle: split-personality between MA "Instance name" (internal) and Yandex
 # "Skill name" (user-facing voice trigger). Default merged — both come from
 # CONF_DIALOG_SKILL_NAME. Power users can flip this to expose a separate
 # CONF_INSTANCE_NAME field.
 CONF_USE_DIFFERENT_INSTANCE_NAME = "use_different_instance_name"
+
+# Yandex Dialogs catalog voice options (TTS), passed to draft payload.
+# Wire values + display names extracted live from the dev console
+# (https://dialogs.yandex.ru/developer → skill → Голос dropdown) on
+# 2026-05-07; other strings will be rejected by the draft PATCH.
+# Voice selection rarely matters for voice-control skills (the user
+# hears Alice, not the skill's TTS), but we expose it for completeness.
+DIALOG_VOICE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("good_oksana", "Оксана (default)"),
+    ("jane", "Джейн"),
+    ("zahar", "Захар"),  # noqa: RUF001
+    ("ermil", "Эрмил"),
+    ("erkanyavas", "Эркан Явас"),
+    ("shitova.us", "Алиса"),
+    ("kostya.gpu", "Костя"),
+    ("valtz.gpu", "Филипп"),
+    ("tatyana_abramova.gpu", "Аня"),
+)
+DIALOG_VOICE_DEFAULT = "good_oksana"
 
 # ---------------------------------------------------------------------------
 # Form categories (progressive disclosure)
