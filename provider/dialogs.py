@@ -73,6 +73,7 @@ from .dialogs_nlu import (
     resolve_player_candidates,
 )
 from .dialogs_player import play_for_alice, resolve_query
+from .tts_dictionary import PHRASE_REPLACEMENTS, WORD_REPLACEMENTS
 
 if TYPE_CHECKING:
     from music_assistant.mass import MusicAssistant
@@ -81,41 +82,51 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-# Static stress-mark dictionary for common response words (P0.2).
-# Keys are case-insensitive whole-word matches; the marker is `+` placed
-# directly before the stressed vowel — Yandex Alice TTS supports this
-# inline syntax. Keep small and high-confidence; band/track names are
-# left as-is (those need a separate phoneme dict — P2.3).
-_TTS_STRESS_MARKS: dict[str, str] = {
-    "включаю": "включ+аю",
-    "ставлю": "ст+авлю",
-    "пауза": "п+ауза",
-    "продолжаю": "продолж+аю",
-    "следующая": "сл+едующая",
-    "предыдущая": "пред+ыдущая",
-    "громче": "гр+омче",
-    "тише": "т+ише",
-    "громкость": "гр+омкость",
-    "колонке": "кол+онке",
-    "колонку": "кол+онку",
-}
-
-_TTS_WORD_RE = re.compile(r"[А-Яа-яЁё]+")
+# P0.2 — TTS pronunciation hints. The `_tts_for` helper rewrites known
+# words to add `+` stress markers (Russian) or Cyrillic transliterations
+# (foreign artist names) so Alice's TTS reads them naturally. Tables
+# live in `tts_dictionary.py` for easier PR contributions; the regex
+# matches BOTH Latin and Cyrillic words because foreign artist names
+# arrive in Latin (e.g., the user said "Metallica" → command keeps it
+# Latin → response text says "Metallica" → tts says "мет+аллика").
+_TTS_WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 
 
 def _tts_for(text: str) -> str:
-    """Add `+` stress markers to known words for cleaner Alice TTS.
+    """Add `+` stress markers and foreign-name transliterations for Alice TTS.
 
-    Pure substitution — unknown words pass through unchanged. The map is
-    intentionally small (high-confidence Russian response words only);
-    expand via PRs as patterns emerge.
+    Two passes:
+      1. Multi-word phrase replacement (longest first via the table's
+         declared order). Required for "Iron Maiden", "Pink Floyd" etc.
+         which the per-word regex cannot match across whitespace.
+      2. Per-word substitution against ``WORD_REPLACEMENTS`` — covers
+         Russian response stresses and single-word foreign names.
+
+    Unknown words pass through unchanged. The map is intentionally small
+    and curated — every entry is maintenance debt; add via PR when a
+    real-user log shows Alice mispronouncing a specific word.
     """
     if not text:
         return text
 
+    # Phrase pass — case-insensitive whole-substring replacement. Walks
+    # the table in declared order so longer phrases (e.g. "red hot chili
+    # peppers") match before any sub-string entries. Result drops the
+    # original casing on the matched span — for TTS-only output that's
+    # acceptable (Alice doesn't render visual casing on voice surfaces;
+    # screen surfaces read `text`, not `tts`).
+    lowered = text.lower()
+    if any(phrase in lowered for phrase, _ in PHRASE_REPLACEMENTS):
+        for phrase, replacement in PHRASE_REPLACEMENTS:
+            idx = lowered.find(phrase)
+            while idx != -1:
+                text = text[:idx] + replacement + text[idx + len(phrase):]
+                lowered = text.lower()
+                idx = lowered.find(phrase, idx + len(replacement))
+
     def _sub(match: re.Match[str]) -> str:
         word = match.group(0)
-        replacement = _TTS_STRESS_MARKS.get(word.lower())
+        replacement = WORD_REPLACEMENTS.get(word.lower())
         if replacement is None:
             return word
         if word[:1].isupper():
@@ -128,6 +139,20 @@ def _tts_for(text: str) -> str:
 def _safe_dict(value: Any) -> dict[str, Any]:
     """Return value if it's a dict, else an empty dict (defensive parsing)."""
     return value if isinstance(value, dict) else {}
+
+
+# Suggestion buttons appended to play-/control-success responses on
+# screened surfaces (mobile Alice, station-max, navigator, smart-screen).
+# Lets the user tap a follow-up without saying the activation phrase
+# again. `hide=False` keeps them on screen until tapped or the next
+# response replaces them. Voice-only surfaces (Mini, Pro, dumb speakers)
+# don't render buttons — so we omit the field entirely on those.
+_PLAYBACK_SUGGESTION_BUTTONS: list[dict[str, Any]] = [
+    {"title": "Следующая", "hide": False},
+    {"title": "Пауза", "hide": False},
+    {"title": "Громче", "hide": False},
+    {"title": "Тише", "hide": False},
+]
 
 
 def _has_screen(meta: Any) -> bool:
@@ -240,6 +265,7 @@ class DialogsWebhookHandler:
         skill_id: str,
         webhook_secret: str,
         exposed_player_ids: set[str] | None = None,
+        voice_continuation: bool = False,
         logger: logging.Logger | None = None,
     ) -> None:
         """Initialize the handler.
@@ -251,12 +277,19 @@ class DialogsWebhookHandler:
             webhook_secret: Random secret embedded in the webhook URL.
             exposed_player_ids: Optional restriction set; only these players
                 are addressable by voice (passed to the player resolver).
+            voice_continuation: When True, play- and control-success
+                responses keep the conversation open (``end_session=False``)
+                so the user can issue follow-ups without re-saying the
+                activation phrase. Default False preserves today's
+                voice-UX. Stop / pause-with-no-resume utterances still
+                close the session via the existing control path.
             logger: Optional logger override.
         """
         self._mass = mass
         self._skill_id = skill_id
         self._webhook_secret = webhook_secret
         self._exposed_player_ids = exposed_player_ids
+        self._voice_continuation = voice_continuation
         self._logger = logger or _LOGGER
         self._unregister_callbacks: list[Callable[[], None]] = []
         # In-process state cache; see _STATE_CACHE_TTL_SEC / _MAX.
@@ -573,6 +606,7 @@ class DialogsWebhookHandler:
                 default_id=default_id,
                 session_state_in=_without_pending(session_state_in),
                 app_state_in=app_state_in,
+                has_screen=has_screen,
             )
 
         # P0.4 — awaiting-query re-entry. If the previous turn asked "Что
@@ -764,6 +798,7 @@ class DialogsWebhookHandler:
             player=candidates[0],
             base_session_state=session_state_in,
             base_app_state=app_state_in,
+            has_screen=has_screen,
         )
 
     # -------------------------------------------------------------------
@@ -778,6 +813,7 @@ class DialogsWebhookHandler:
         default_id: str | None,
         session_state_in: dict[str, Any],
         app_state_in: dict[str, Any],
+        has_screen: bool = True,
     ) -> web.Response:
         """Resolve player + dispatch a control action; build response."""
         # list_players is informational — no player resolution / dispatch.
@@ -1001,13 +1037,21 @@ class DialogsWebhookHandler:
         if isinstance(user_obj, dict) and user_obj.get("user_id"):
             user_state_update = {"preferred_player_id": player.player_id}
         text = control_confirmation(control)
+        # Stop is the natural session-end signal — even with voice
+        # continuation enabled, "стоп / выключи" should hand the mic
+        # back to the user instead of staying in the skill listening loop.
+        end_session = (
+            True if control.action == "stop" else not self._voice_continuation
+        )
         return self._yandex_response(
             incoming_session=session,
             text=text,
             tts=_tts_for(text),
+            end_session=end_session,
             session_state=new_session_state,
             application_state=new_app_state,
             user_state_update=user_state_update,
+            buttons=_PLAYBACK_SUGGESTION_BUTTONS if has_screen else None,
         )
 
     # -------------------------------------------------------------------
@@ -1022,6 +1066,7 @@ class DialogsWebhookHandler:
         player: Any,
         base_session_state: dict[str, Any],
         base_app_state: dict[str, Any],
+        has_screen: bool = True,
     ) -> web.Response:
         """Search media, fire-and-forget play, build response with persisted state."""
         try:
@@ -1094,9 +1139,11 @@ class DialogsWebhookHandler:
             incoming_session=session,
             text=text,
             tts=_tts_for(text),
+            end_session=not self._voice_continuation,
             session_state=new_session_state,
             application_state=new_app_state,
             user_state_update=user_state_update,
+            buttons=_PLAYBACK_SUGGESTION_BUTTONS if has_screen else None,
         )
 
     # -------------------------------------------------------------------
@@ -1348,6 +1395,7 @@ class DialogsWebhookHandler:
             player=chosen_player,
             base_session_state=session_state_in,
             base_app_state=app_state_in,
+            has_screen=has_screen,
         )
 
     # -------------------------------------------------------------------
@@ -1365,6 +1413,7 @@ class DialogsWebhookHandler:
         application_state: dict[str, Any] | None = None,
         user_state_update: dict[str, Any] | None = None,
         buttons: list[dict[str, Any]] | None = None,
+        card: dict[str, Any] | None = None,
     ) -> web.Response:
         """Build a Yandex Dialogs response envelope.
 
@@ -1372,6 +1421,14 @@ class DialogsWebhookHandler:
         Yandex spec; ``user_state_update`` is merged into the existing
         user-scoped state (set keys to None to clear). Omit a parameter
         to leave that bucket unchanged on Yandex's side.
+
+        ``card`` accepts one of the three Yandex card shapes:
+        ``BigImage`` (single image + title + description),
+        ``ItemsList`` (1-5 items, each with image + title), or
+        ``ImageGallery`` (1-7 images). Yandex silently drops the field
+        on voice-only surfaces, so callers must still gate emission on
+        ``meta.interfaces.screen`` to avoid wasted bandwidth and to
+        honour the buttons-on-screen-only contract.
 
         Side effect: any time we set ``session_state`` or
         ``application_state``, the merged value is also written to the
@@ -1401,6 +1458,8 @@ class DialogsWebhookHandler:
         }
         if buttons:
             response_body["buttons"] = buttons
+        if card:
+            response_body["card"] = card
         payload: dict[str, Any] = {
             "version": "1.0",
             "session": echoed,

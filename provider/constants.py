@@ -111,6 +111,15 @@ CONF_DIALOG_ACTIVATION_PHRASE_4 = "dialog_activation_phrase_4"
 # CONF_INSTANCE_NAME field.
 CONF_USE_DIFFERENT_INSTANCE_NAME = "use_different_instance_name"
 
+# Toggle: keep the conversation open after a play / control success (P1.4).
+# Default OFF — historical voice-UX where the skill ends the session and
+# the user re-says "Алиса, попроси <name>" for the next command. ON keeps
+# `end_session=false` after success so follow-ups skip the activation
+# preamble at the cost of a "skill is listening" indicator on screened
+# surfaces. Explicit "стоп / выключи / спасибо" still ends the session
+# (those phrases parse as the existing `stop` control intent).
+CONF_DIALOG_VOICE_CONTINUATION = "dialog_voice_continuation"
+
 # Yandex Dialogs catalog voice options (TTS), passed to draft payload.
 # Wire values + display names extracted live from the dev console
 # (https://dialogs.yandex.ru/developer → skill → Голос dropdown) on

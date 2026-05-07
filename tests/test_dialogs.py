@@ -241,6 +241,138 @@ class TestDialogsWebhookHandler:
         assert call_kwargs["media"] is track
 
 
+@pytest.mark.asyncio
+class TestSuggestionButtons:
+    """Phase 1 / P1.3: play- and control-success responses surface follow-up buttons on screen."""
+
+    def _make_handler(self, mass: MagicMock) -> DialogsWebhookHandler:
+        return DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
+
+    async def test_play_success_emits_buttons_on_screen(self) -> None:
+        """Play-success on screened surface includes Следующая/Пауза/Громче/Тише buttons."""
+        track = MagicMock(uri="library://track/1", spec_set=["uri"])
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")], search_track=track)
+        handler = self._make_handler(mass)
+        body = {
+            "meta": {"interfaces": {"screen": {}}},
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        assert resp.status == 200
+        body_out = _response_body(resp)
+        button_titles = [b["title"] for b in body_out["response"]["buttons"]]
+        assert button_titles == ["Следующая", "Пауза", "Громче", "Тише"]
+
+    async def test_play_success_no_buttons_voice_only(self) -> None:
+        """Play-success on a voice-only surface omits buttons entirely."""
+        track = MagicMock(uri="library://track/1", spec_set=["uri"])
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")], search_track=track)
+        handler = self._make_handler(mass)
+        body = {
+            # No meta.interfaces — voice-only (Yandex Mini etc.)
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        assert "buttons" not in body_out["response"]
+
+    async def test_control_success_emits_buttons_on_screen(self) -> None:
+        """Control-success (e.g. pause) on screened surface includes the same buttons."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.pause = AsyncMock()
+        handler = self._make_handler(mass)
+        body = {
+            "meta": {"interfaces": {"screen": {}}},
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "пауза на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        button_titles = [b["title"] for b in body_out["response"]["buttons"]]
+        assert button_titles == ["Следующая", "Пауза", "Громче", "Тише"]
+
+
+@pytest.mark.asyncio
+class TestVoiceContinuation:
+    """Phase 1 / P1.4: opt-in `end_session=false` after play / control success."""
+
+    async def test_play_success_ends_session_by_default(self) -> None:
+        """Without the toggle, play-success closes the session (today's UX)."""
+        track = MagicMock(uri="library://track/1", spec_set=["uri"])
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")], search_track=track)
+        handler = DialogsWebhookHandler(mass, skill_id="skill-uuid-1", webhook_secret=_TEST_SECRET)
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is True
+
+    async def test_play_success_keeps_session_open_when_continuation_on(self) -> None:
+        """With continuation on, play-success keeps the conversation alive."""
+        track = MagicMock(uri="library://track/1", spec_set=["uri"])
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")], search_track=track)
+        handler = DialogsWebhookHandler(
+            mass,
+            skill_id="skill-uuid-1",
+            webhook_secret=_TEST_SECRET,
+            voice_continuation=True,
+        )
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "включи Metallica на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is False
+
+    async def test_control_success_keeps_session_open_when_continuation_on(self) -> None:
+        """Continuation also applies to control-success (pause / volume / etc.)."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.pause = AsyncMock()
+        handler = DialogsWebhookHandler(
+            mass,
+            skill_id="skill-uuid-1",
+            webhook_secret=_TEST_SECRET,
+            voice_continuation=True,
+        )
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "пауза на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is False
+
+    async def test_stop_action_ends_session_even_with_continuation_on(self) -> None:
+        """`стоп / выключи` always closes the session regardless of the toggle."""
+        mass = _make_mass([MockPlayer(player_id="p1", name="Кухня")])
+        mass.player_queues.stop = AsyncMock()
+        handler = DialogsWebhookHandler(
+            mass,
+            skill_id="skill-uuid-1",
+            webhook_secret=_TEST_SECRET,
+            voice_continuation=True,
+        )
+        body = {
+            "session": {"skill_id": "skill-uuid-1", "session_id": "s1", "new": False},
+            "request": {"command": "стоп на кухне"},
+        }
+        resp = await handler._handle_webhook(_build_request(body))
+        await asyncio.sleep(0)
+        body_out = _response_body(resp)
+        assert body_out["response"]["end_session"] is True
+
+
 # ---------------------------------------------------------------------------
 # Yandex state envelope (P0.1) + tts split (P0.2)
 # ---------------------------------------------------------------------------
@@ -384,9 +516,9 @@ class TestStatePersistence:
 class TestTtsHelper:
     """Tests for _tts_for stress-mark substitution."""
 
-    def test_known_word_gets_stress_mark(self) -> None:
-        """A known word from the dict has `+` injected before the stressed vowel."""
-        assert _tts_for("Включаю Metallica") == "Включ+аю Metallica"
+    def test_known_russian_word_gets_stress_mark(self) -> None:
+        """A known Russian word has `+` injected before the stressed vowel."""
+        assert _tts_for("Включаю джаз") == "Включ+аю джаз"
 
     def test_unknown_word_passes_through(self) -> None:
         """A word not in the dict is unchanged."""
@@ -402,6 +534,26 @@ class TestTtsHelper:
         assert _tts_for("включаю джаз") == "включ+аю джаз"
         # Capitalised original.
         assert _tts_for("Включаю джаз") == "Включ+аю джаз"
+
+    def test_foreign_band_transliterated(self) -> None:
+        """Latin band names are transliterated to Cyrillic with stress marks."""
+        # Single-word foreign band (regex pass).
+        assert _tts_for("Включаю Metallica") == "Включ+аю Мет+аллика"
+        # Lowercase form preserved.
+        assert _tts_for("включаю metallica") == "включ+аю мет+аллика"
+
+    def test_foreign_phrase_transliterated(self) -> None:
+        """Multi-word foreign band names are matched via the phrase pass."""
+        result = _tts_for("Включаю Iron Maiden на кухне")
+        assert "+айрон м+эйден" in result.lower()
+        # Russian response words still get their stress mark in the same call.
+        assert "Включ+аю" in result
+
+    def test_phrase_pass_handles_overlap(self) -> None:
+        """Longer phrases match before shorter sub-phrases (declared order)."""
+        # "imagine dragons" must win over the single-word "imagine" entry.
+        result = _tts_for("Imagine Dragons")
+        assert "имадж+ин др+агонс" in result.lower()
 
 
 @pytest.mark.asyncio
