@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-05-09
+
+### Fixed
+
+- **Skill creation failed with «`[control.volume_set] Некорректный
+  символ`»** during the auto-create / auto-update pipeline. Yandex's
+  Granet validator rejects `%lemma` morphology directives placed
+  inside `[...]` optional blocks (`[%lemma сделать]`,
+  `[%lemma перемотать]`). Three v1.4.0 grammars used that pattern
+  (`control.volume_set`, `control.seek_forward`,
+  `control.seek_back`) and would not pass moderation. Rewrote each
+  to express the optional verb as a top-level alternation branch
+  (bare-noun / verb-led) so the directive sits at root level.
+
+  Phrases like "сделай громкость 50", "перемотай вперёд на 30
+  секунд" and bare "громкость 50", "вперёд 30 секунд" all still
+  match — same surface coverage, just expressed differently in DSL.
+
 ## [1.4.1] - 2026-05-09
 
 ### Fixed
