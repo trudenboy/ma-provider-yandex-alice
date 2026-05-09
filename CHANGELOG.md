@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-05-09
+
+### Changed
+
+- **Bumps `ya-dialogs-api==2.1.1`.** Version 2.1.1 enriches the
+  validation-error message that surfaces when Yandex rejects an intent
+  grammar at *Create skill* time — the error now identifies which
+  intent and where in its source text the problem is, instead of
+  collapsing every failure to a generic «Некорректный аргумент». The
+  on-screen log line for failed skill provisioning now points
+  directly at the offending grammar so it can be fixed without trial
+  and error.
+
 ## [1.3.4] - 2026-05-09
 
 ### Fixed
