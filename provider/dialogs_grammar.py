@@ -220,18 +220,21 @@ $Delta: $YANDEX.NUMBER
 """
 
 # Seek with custom-entity unit (seconds / minutes). The runtime mapper
-# multiplies by 60 when unit=="minutes". Yandex stores entity-typed slot
-# values as the entity-value name, not the surface phrase.
+# multiplies by 60 when unit=="minutes" and defaults to seconds when the
+# unit slot is absent — the grammar marks $Unit optional so phrases like
+# "перемотай вперёд на 30" (no unit-word) still match. Yandex stores
+# entity-typed slot values as the entity-value name, not the surface
+# phrase.
 _SEEK_FORWARD_GRAMMAR = """\
 root:
-    [%lemma перемотать] вперёд [на] $Amount $Unit
+    [%lemma перемотать] вперёд [на] $Amount [$Unit]
 $Amount: $YANDEX.NUMBER
 $Unit: $time_unit
 """
 
 _SEEK_BACK_GRAMMAR = """\
 root:
-    [%lemma перемотать] назад [на] $Amount $Unit
+    [%lemma перемотать] назад [на] $Amount [$Unit]
 $Amount: $YANDEX.NUMBER
 $Unit: $time_unit
 """
@@ -502,33 +505,80 @@ def _slot_str(slots: dict[str, Any] | None, name: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-# Trailing "на <player>" suffix matcher used to attach a player hint to a
-# platform-parsed control intent. Yandex's static custom intents can't
-# enumerate the per-user list of player names, so the suffix is stripped
-# from the raw command text and attached to the ParsedControl alongside.
-_TRAILING_HINT_RE = re.compile(r"\s+на\s+(?P<hint>\S.*?)\s*$", re.IGNORECASE)
+# "на" boundary used to peel the trailing player-hint suffix off a
+# platform-parsed command text. Yandex's static custom intents can't
+# enumerate the per-user list of player names, so the suffix is
+# recovered from the raw command text and attached to the ParsedControl
+# alongside.
+_NA_BOUNDARY_RE = re.compile(r"\s+на\s+", re.IGNORECASE)
+
+# Hint candidates that are clearly not a player name. Phrases containing
+# multiple "на" tokens (e.g. "громкость на 50 на кухне", "перемотай на 30
+# секунд", "поставь на паузу на кухне") would otherwise misroute the
+# slot-side "на N <unit>" or the action-side "на <noun>" as a hint.
+#
+# - ``_HINT_UNIT_WORDS`` covers unit nouns that follow numeric slots
+#   ("на 30 секунд", "на 50 процентов").
+# - ``_HINT_ACTION_WORDS`` covers action-content nouns from grammars
+#   that themselves use "на <noun>" (currently only "паузу" from
+#   ``_PAUSE_GRAMMAR`` — "поставь на паузу" / "на паузу"). When a new
+#   intent grammar introduces another such token, add it here.
+_HINT_UNIT_WORDS: frozenset[str] = frozenset(
+    {
+        "секунда",
+        "секунды",
+        "секунд",
+        "сек",
+        "минута",
+        "минуты",
+        "минут",
+        "мин",
+        "процент",
+        "процента",
+        "процентов",
+    }
+)
+_HINT_ACTION_WORDS: frozenset[str] = frozenset(
+    {
+        "паузу",
+    }
+)
 
 
 def extract_trailing_player_hint(text: str) -> str | None:
-    """Return the lower-cased "на <player>" suffix from ``text``, or None.
+    """Return the lower-cased trailing "на <player>" suffix, or None.
 
-    Example: ``"пауза на кухне"`` → ``"кухне"``.
+    Examples:
+        ``"пауза на кухне"`` → ``"кухне"``
+        ``"поставь на паузу на кухне"`` → ``"кухне"`` (only the rightmost
+        "на " is taken)
+        ``"перемотай вперёд на 30 секунд"`` → ``None`` (the suffix is a
+        slot value, not a player name)
+        ``"громкость на 50"`` → ``None``
 
-    Only the trailing occurrence is considered. Internal "на" tokens
-    (e.g. ``"поставь на паузу"``) are deliberately not extracted —
-    callers can pre-strip well-known control-action phrases before
-    invoking this if they need stricter behaviour, but for the
-    platform-intent path the action has already been classified by
-    Yandex, so any "на ..." remaining at the end of the command is the
-    hint.
+    The suffix is rejected when its first token starts with a digit or
+    is one of the unit words ("секунд", "минут", "процентов" and their
+    morphological variants) — those follow "на" as part of a numeric
+    slot, not as a destination player.
     """
     if not text:
         return None
-    match = _TRAILING_HINT_RE.search(text)
-    if not match:
+    parts = _NA_BOUNDARY_RE.split(text)
+    if len(parts) < 2:
         return None
-    hint = match.group("hint").strip().lower()
-    return hint or None
+    hint = parts[-1].strip().lower()
+    if not hint:
+        return None
+    first_token = hint.split(maxsplit=1)[0]
+    if first_token[0].isdigit():
+        return None
+    if first_token in _HINT_UNIT_WORDS:
+        return None
+    # Single-token hint matching an action-content noun ("паузу") is
+    # part of the action phrase, not a destination player.
+    if " " not in hint and hint in _HINT_ACTION_WORDS:
+        return None
+    return hint
 
 
 def parse_platform_intent(

@@ -1,4 +1,4 @@
-# ruff: noqa: D102, PT018
+# ruff: noqa: D102, PT018, RUF001
 # mypy: disable-error-code="union-attr"
 """Unit tests for ``provider.dialogs_grammar`` — platform intent mapping.
 
@@ -25,6 +25,7 @@ from provider.dialogs_grammar import (
     TIME_UNIT_ENTITY,
     build_entities,
     build_grammar,
+    extract_trailing_player_hint,
     parse_platform_intent,
 )
 from provider.dialogs_nlu import ParsedCommand
@@ -51,9 +52,34 @@ class TestNoSlotControlMap:
         for form_name, action in _CONTROL_INTENT_MAP.items():
             assert action in valid_actions, f"{form_name} → {action!r} not a ControlAction"
 
-    def test_map_size_matches_v140_baseline(self) -> None:
-        """18 no-slot control intents in v1.4.0 (10 originals + 8 new)."""
-        assert len(_CONTROL_INTENT_MAP) == 18
+    def test_map_covers_v140_baseline(self) -> None:
+        """Every v1.4.0 baseline form_name is present in the map.
+
+        Pinned by membership rather than a count so adding a new no-slot
+        intent in a follow-up only requires extending the map and the
+        grammar — no edit here.
+        """
+        baseline = {
+            "control.pause",
+            "control.resume",
+            "control.next",
+            "control.previous",
+            "control.stop",
+            "control.volume_up",
+            "control.volume_down",
+            "control.shuffle_on",
+            "control.shuffle_off",
+            "control.now_playing",
+            "control.mute",
+            "control.unmute",
+            "control.seek_start",
+            "control.repeat_one",
+            "control.repeat_all",
+            "control.repeat_off",
+            "control.list_players",
+            "control.forget_player",
+        }
+        assert baseline <= set(_CONTROL_INTENT_MAP)
 
 
 class TestVolumeSetSlot:
@@ -222,6 +248,62 @@ class TestEdgeCases:
         assert result is not None and result.action in ("pause", "next")
 
 
+class TestExtractTrailingPlayerHint:
+    """Recover trailing "на <player>" suffix attached to intent payloads.
+
+    Yandex's static intents can't enumerate the per-user player list,
+    so the hint comes from raw command text. The function rejects
+    "на" tokens that introduce a numeric slot value or an action-content
+    word like "паузу".
+    """
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            # Positive — trailing player hint.
+            ("пауза на кухне", "кухне"),
+            ("следующая на спальне", "спальне"),
+            ("приглуши на гостиной", "гостиной"),
+            # Multiple "на" — only the rightmost suffix is taken.
+            ("поставь на паузу на кухне", "кухне"),
+            ("громкость на 50 на кухне", "кухне"),
+            ("перемотай вперёд на 30 секунд на кухне", "кухне"),
+            # Multi-word hint stays intact.
+            ("пауза на колонке у окна", "колонке у окна"),
+            # Capitalisation is normalised.
+            ("Пауза На Кухне", "кухне"),
+        ],
+    )
+    def test_returns_hint_when_trailing_suffix_is_a_player(
+        self,
+        text: str,
+        expected: str,
+    ) -> None:
+        assert extract_trailing_player_hint(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # No "на" boundary at all.
+            "",
+            "пауза",
+            "следующий трек",
+            # Trailing "на" leads into a numeric slot, not a player name.
+            "громкость на 50",
+            "прибавь на 20",
+            "убавь на 25 процентов",
+            "перемотай вперёд на 30",
+            "перемотай вперёд на 30 секунд",
+            "перемотай назад на 1 минуту",
+            # Trailing "на" leads into a unit word with no number — still
+            # not a player name.
+            "поставь на паузу",
+        ],
+    )
+    def test_returns_none_when_suffix_is_a_slot_value(self, text: str) -> None:
+        assert extract_trailing_player_hint(text) is None
+
+
 class TestBuildersConsistency:
     """build_grammar / build_entities — declarative state must round-trip."""
 
@@ -234,10 +316,41 @@ class TestBuildersConsistency:
         value_names = [v.name for v in entities[0].values]
         assert "seconds" in value_names and "minutes" in value_names
 
-    def test_build_grammar_returns_24_intents(self) -> None:
-        """v1.4.0: 18 no-slot + 5 slot-bearing + my_wave = 24."""
+    def test_build_grammar_covers_v140_baseline(self) -> None:
+        """v1.4.0 baseline: 18 no-slot control + 5 slot-bearing + 1 play.
+
+        Pinned by membership so extending the grammar in a follow-up
+        doesn't require touching this assertion.
+        """
         grammar = build_grammar()
-        assert len(grammar) == 24
+        form_names = {i.form_name for i in grammar}
+        baseline = {
+            "control.pause",
+            "control.resume",
+            "control.next",
+            "control.previous",
+            "control.stop",
+            "control.volume_up",
+            "control.volume_down",
+            "control.shuffle_on",
+            "control.shuffle_off",
+            "control.now_playing",
+            "control.mute",
+            "control.unmute",
+            "control.seek_start",
+            "control.repeat_one",
+            "control.repeat_all",
+            "control.repeat_off",
+            "control.list_players",
+            "control.forget_player",
+            "control.volume_set",
+            "control.volume_increase",
+            "control.volume_decrease",
+            "control.seek_forward",
+            "control.seek_back",
+            "play.my_wave",
+        }
+        assert baseline <= form_names
 
     def test_build_grammar_form_names_unique(self) -> None:
         grammar = build_grammar()
