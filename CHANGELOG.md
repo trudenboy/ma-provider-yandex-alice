@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-05-09
+
+### Fixed
+
+- **Auto-update error wording points at the wrong action.** When the
+  cached Yandex Passport authentication is missing or rejected during
+  a rename / drift-sync click, the resulting error told the user to
+  click *Create skill* — but that action is hidden until sign-in
+  succeeds, so the suggested recovery led nowhere. Both messages now
+  direct the user to the *Sign in to Yandex Passport* action that is
+  actually available in that state.
+
 ## [1.3.3] - 2026-05-09
 
 ### Changed
