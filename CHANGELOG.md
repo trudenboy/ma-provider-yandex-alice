@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-05-09
+
+### Changed
+
+- `parse_command` docstring (`provider/dialogs_nlu.py`) reformatted from a Google-style `Examples:` block to Sphinx-style `:param:` per the upstream music-assistant/server CLAUDE.md docstring rule.
+
 ## [1.3.2] — 2026-05-08
 
 ### Fixed
