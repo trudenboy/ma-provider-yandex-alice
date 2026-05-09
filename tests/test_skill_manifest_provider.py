@@ -373,6 +373,17 @@ class TestImportFromPaste:
         assert not provider.last_import_success
         assert "base64" in msg.lower() or "не удался" in msg
 
+    def test_base64_paste_with_wrapped_lines(self, provider: SkillManifestProvider) -> None:
+        # `base64 -i skill.toml` wraps at 76 cols by default — the decoder
+        # must tolerate the embedded newlines & arbitrary whitespace.
+        text = self._valid_toml()
+        encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        wrapped = "\n".join(encoded[i : i + 60] for i in range(0, len(encoded), 60))
+        wrapped_with_spaces = f"  {wrapped}\n  "
+        msg = provider.import_from_paste(f"data:base64,{wrapped_with_spaces}")
+        assert provider.last_import_success, msg
+        assert provider.override_path.read_text(encoding="utf-8") == text
+
 
 class TestResetOverride:
     def test_idempotent_when_absent(self, provider: SkillManifestProvider) -> None:
@@ -425,3 +436,90 @@ class TestStorageRoot:
         provider = SkillManifestProvider(mass)
         # Just check shape — we don't actually want to write into ~/.musicassistant.
         assert provider.override_path.parts[-2:] == ("yandex_alice", "skill.toml")
+
+
+# ---------------------------------------------------------------------------
+# Effective-manifest cache
+# ---------------------------------------------------------------------------
+
+
+class TestResolvedCache:
+    """``manifest()`` / ``status()`` reuse the parsed manifest until stat changes.
+
+    The cache is keyed by ``(exists, mtime_ns)``: identical stat → same
+    object; mtime change → re-parse; mutating actions invalidate even
+    when mtime stays put (some filesystems coalesce sub-ms writes).
+    """
+
+    def test_bundled_path_returns_same_object(self, provider: SkillManifestProvider) -> None:
+        first = provider.manifest()
+        second = provider.manifest()
+        assert first is second
+
+    def test_override_path_returns_same_object_until_mtime_changes(
+        self, provider: SkillManifestProvider
+    ) -> None:
+        provider.export_to_override()
+        first = provider.manifest()
+        second = provider.manifest()
+        assert first is second
+        # Touch the file with a fresh mtime — cache must invalidate.
+        import os as _os  # noqa: PLC0415
+
+        st = provider.override_path.stat()
+        _os.utime(provider.override_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+        third = provider.manifest()
+        assert third is not first
+
+    def test_export_invalidates_cache(self, provider: SkillManifestProvider) -> None:
+        # Prime cache on bundled.
+        before = provider.manifest()
+        assert provider.status().source == "bundled"
+        provider.export_to_override()
+        # Now status must observe the freshly-written override.
+        assert provider.status().source == "override_valid"
+        # Effective manifest still parses to a SkillManifest equivalent
+        # to the bundled one (Export copies bundled bytes verbatim) but
+        # is a fresh object — i.e. cache was actually invalidated.
+        after = provider.manifest()
+        assert after is not before
+
+    def test_reset_invalidates_cache(self, provider: SkillManifestProvider) -> None:
+        provider.export_to_override()
+        assert provider.status().source == "override_valid"
+        provider.reset_override()
+        assert provider.status().source == "bundled"
+
+    def test_import_invalidates_cache(self, provider: SkillManifestProvider) -> None:
+        toml = (
+            'schema_version = 1\n[entities]\ntext = ""\n'
+            '[[intents]]\nform_name = "control.test"\ngrammar = "root: x"\n'
+            '[intents.runtime]\nkind = "control"\naction = "pause"\n'
+        )
+        # Prime cache on bundled.
+        provider.manifest()
+        provider.import_from_paste(toml)
+        m = provider.manifest()
+        assert len(m.intents) == 1
+        assert m.intents[0].form_name == "control.test"
+
+
+class TestAtomicWrite:
+    """Export / Import use tmp+rename so readers never see a half-written file."""
+
+    def test_export_does_not_leave_tmp_file(self, provider: SkillManifestProvider) -> None:
+        provider.export_to_override()
+        siblings = list(provider.override_path.parent.iterdir())
+        assert len(siblings) == 1
+        assert siblings[0] == provider.override_path
+
+    def test_import_does_not_leave_tmp_file(self, provider: SkillManifestProvider) -> None:
+        toml = (
+            'schema_version = 1\n[entities]\ntext = ""\n'
+            '[[intents]]\nform_name = "control.test"\ngrammar = "root: x"\n'
+            '[intents.runtime]\nkind = "control"\naction = "pause"\n'
+        )
+        provider.import_from_paste(toml)
+        siblings = list(provider.override_path.parent.iterdir())
+        assert len(siblings) == 1
+        assert siblings[0] == provider.override_path
