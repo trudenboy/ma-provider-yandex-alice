@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-05-09
+
+### Fixed
+
+- **Skill creation failed with «`[control.list_players] Пустой
+  элемент`»** during the auto-create / auto-update pipeline.
+  Yandex's Granet validator rejects intent grammars whose
+  alternations span multiple lines with `|` opening a continuation
+  line — it sees an empty operand at the line break. Four v1.4.0
+  intent grammars (`control.list_players`,
+  `control.forget_player`, `control.volume_increase`,
+  `control.volume_decrease`) were authored that way and would not
+  pass moderation. Collapsed every alternation onto a single root
+  line. No behavioural change to the runtime parser; affects only
+  the DSL the library ships to Yandex.
+
 ## [1.4.0] - 2026-05-09
 
 ### Added
