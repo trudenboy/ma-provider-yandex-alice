@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-05-09
+
+### Fixed
+
+- **Custom-intent grammars rejected by Yandex with «Некорректный
+  аргумент».** *Create skill* failed at the very first intent
+  (`control.pause`) because every grammar declared the `%lemma`
+  directive inline (`%lemma пауза`), a form the Yandex Dialogs
+  grammar parser does not accept — the directive must appear on its
+  own line and is then scoped to the indented alternatives that
+  follow. All 11 declared grammars are reformatted to put `%lemma` on
+  its own line and to separate alternatives with the canonical pipe
+  (`|`). The first grammar (control.pause) was test-validated in the
+  Yandex dev console: 100% precision / 100% recall against the
+  shipped positive/negative tests. The skill now provisions all 11
+  intents in one *Create skill* / *Apply changes* round-trip.
+
 ## [1.3.5] - 2026-05-09
 
 ### Changed
