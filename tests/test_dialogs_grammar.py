@@ -206,6 +206,28 @@ class TestSeekSlots:
             parse_platform_intent({"control.seek_back": _intent({"amount": {"value": -5}})}) is None
         )
 
+    def test_seconds_exceeding_cap_falls_through(self) -> None:
+        """Out-of-range seek (>24h equivalent) → None, no skip dispatched."""
+        result = parse_platform_intent(
+            {
+                "control.seek_forward": _intent(
+                    {"amount": {"value": 100_000}, "unit": {"value": "seconds"}}
+                )
+            }
+        )
+        assert result is None
+
+    def test_minutes_exceeding_cap_falls_through(self) -> None:
+        """Same cap applies after minutes → seconds conversion."""
+        result = parse_platform_intent(
+            {
+                "control.seek_forward": _intent(
+                    {"amount": {"value": 2000}, "unit": {"value": "minutes"}}
+                )
+            }
+        )
+        assert result is None
+
     def test_missing_amount_falls_through(self) -> None:
         assert parse_platform_intent({"control.seek_forward": _intent({})}) is None
 

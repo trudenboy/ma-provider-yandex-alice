@@ -56,7 +56,7 @@ from typing import Any
 
 from ya_dialogs_api import EntityDraft, EntityValue, IntentDraft, SlotDeclaration
 
-from .dialogs_control import ParsedControl
+from .dialogs_control import ControlAction, ParsedControl
 from .dialogs_nlu import ParsedCommand
 
 # ---------------------------------------------------------------------------
@@ -442,7 +442,7 @@ def build_grammar() -> list[IntentDraft]:
 # slot extraction. Keep this map in lockstep with the no-slot grammars
 # above — adding a new no-slot intent here without a matching
 # IntentDraft (or vice versa) would silently misclassify utterances.
-_CONTROL_INTENT_MAP: dict[str, str] = {
+_CONTROL_INTENT_MAP: dict[str, ControlAction] = {
     # Originals
     "control.pause": "pause",
     "control.resume": "resume",
@@ -470,6 +470,14 @@ _CONTROL_INTENT_MAP: dict[str, str] = {
 # intent without picking up a number — mirrors the historical regex
 # fallthrough where bare «прибавь» / «убавь» bumped by ten units.
 _DEFAULT_VOLUME_DELTA = 10
+
+# Upper bound on seek-slot values (seconds). Yandex's YANDEX.NUMBER has
+# no inherent cap, so a misheard "перемотай на тридцать тысяч секунд"
+# would otherwise dispatch ``skip(seconds=30000)`` (~8 h). Anything
+# beyond a day clearly didn't mean what it says — return ``None`` and
+# let the caller surface a graceful "не понял" instead of skipping
+# something nonsensical.
+_MAX_SEEK_SECONDS = 24 * 3600
 
 
 def _slot_int(slots: dict[str, Any] | None, name: str) -> int | None:
@@ -605,7 +613,7 @@ def parse_platform_intent(
         # No-slot control intents — map directly.
         action = _CONTROL_INTENT_MAP.get(form_name)
         if action is not None:
-            return ParsedControl(action=action)  # type: ignore[arg-type]
+            return ParsedControl(action=action)
 
         # Slot-bearing control intents — extract slot values.
         if form_name == "control.volume_set":
@@ -625,8 +633,14 @@ def parse_platform_intent(
                 continue
             unit = _slot_str(slots, "unit") or "seconds"
             seconds = amount * (60 if unit == "minutes" else 1)
-            seek_action = "seek_forward" if form_name.endswith("forward") else "seek_back"
-            return ParsedControl(action=seek_action, value=seconds)  # type: ignore[arg-type]
+            if seconds > _MAX_SEEK_SECONDS:
+                # Out-of-range — treat as a misclassification rather than
+                # dispatching a multi-hour skip.
+                continue
+            seek_action: ControlAction = (
+                "seek_forward" if form_name.endswith("forward") else "seek_back"
+            )
+            return ParsedControl(action=seek_action, value=seconds)
 
         # Play intents.
         if form_name == "play.my_wave":
