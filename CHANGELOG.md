@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-05-09
+
+### Fixed
+
+- **Skill creation failed with «`[control.volume_set] Некорректный
+  аргумент`»** during the auto-create / auto-update pipeline (after
+  the v1.4.2 fix landed). Yandex's Granet validator rejects `%lemma`
+  morphology directives placed **after `|` in an alternation** — only
+  a standalone `%lemma` line at the top of `root:` is accepted (it
+  then applies to every verb / noun in the alternation below; the
+  long-stable `_PAUSE_GRAMMAR` uses this shape).
+
+  Five v1.4.0 grammars used the rejected pattern: `control.volume_set`,
+  `control.volume_increase`, `control.volume_decrease`,
+  `control.seek_forward`, `control.seek_back`. Rewrote each so the
+  `%lemma` directive sits standalone at the top of `root:`. Surface
+  coverage is identical.
+
+  Granet DSL is now empirically pinned to one shape for verb
+  morphology: `%lemma` standalone first, alternation second. v1.4.1
+  + v1.4.2 + v1.4.3 collectively cover all three failure modes
+  (multi-line `|`, `[%lemma … ]`, `| %lemma …`).
+
 ## [1.4.2] - 2026-05-09
 
 ### Fixed
