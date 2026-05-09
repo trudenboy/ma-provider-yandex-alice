@@ -1,55 +1,44 @@
+<!-- ma-provider-tools: rendered from wrappers/CLAUDE.md.j2 -->
 # CLAUDE.md
 
-Yandex Alice voice-skill provider for Music Assistant. Source repo for the
-`yandex_alice` plugin provider that lives at
-`music_assistant/providers/yandex_alice/` upstream — code is authored here
-and synced to `music-assistant/server` via `ma-provider-tools`.
+This file aligns development of the **Yandex Alice** provider with the
+upstream [`music-assistant/server`](https://github.com/music-assistant/server)
+standards. It is rendered from `wrappers/CLAUDE.md.j2` in
+[`trudenboy/ma-provider-tools`](https://github.com/trudenboy/ma-provider-tools)
+and is kept in sync across every provider repo — **do not edit it here**.
 
-This file aligns with the upstream Music Assistant `CLAUDE.md` so that
-provider code authored locally is shaped exactly like provider code in
-the upstream tree (Sphinx docstrings, Behaviour rules, branching).
-
-## Behaviour
-
-- NEVER automatically reply on GitHub (PRs, issues, discussions) without
-  explicit consent from the developer.
-
-## Layout
-
-- `provider/` — plugin source (mirrored to `music_assistant/providers/yandex_alice/` on sync)
-- `tests/` — pytest suite (mirrored to `tests/providers/yandex_alice/`)
-- `docs/` — research notes (`NLU_RESEARCH.md`, `VOICE_UX_RESEARCH.md`, `VOICE_COMMANDS.md`); not synced
-- `provider/manifest.json` — provider metadata + runtime requirements
-- `pyproject.toml` — dev-time deps + lint config; not synced
+Provider-specific architecture, key flows, and gotchas live in
+[`CLAUDE.local.md`](./CLAUDE.local.md). Claude Code automatically picks up both
+files when working in this repository.
 
 ## Development Commands
 
-- `.venv/bin/python -m pytest tests/` — run all tests
-- `.venv/bin/python -m pytest tests/test_dialogs.py -k <pattern>` — single file / pattern
-- `.venv/bin/python -m ruff check provider/ tests/` — lint
-- `.venv/bin/python -m ruff format provider/ tests/` — auto-format
-- `.venv/bin/python -m mypy provider/` — type check (strict mode)
+- `./scripts/setup.sh` — initial setup (venv via `uv`, dependencies, pre-commit hooks). Re-run after pulling latest code.
+- `uv run pytest` — run all tests
+- `uv run pytest provider/tests/<file>.py` — run a specific test file
+- `uv run ruff check provider/` — lint
+- `uv run ruff format provider/` — auto-format
+- `uv run mypy provider/` — type check
 - `pre-commit run --all-files` — full pre-commit gate
 
-Always run lint + tests + mypy before committing. Pre-commit hooks
-mirror these checks plus gitleaks. CI runs `ruff format --check`, so
-pushing without `ruff format` is the most common red build.
+Always run `pre-commit run --all-files` after a code change to ensure the new
+code adheres to the project standards.
 
 ## Code Style
 
 ### Comments
 
-Only use comments to explain complex, multi-line blocks of code. Do not
-comment obvious operations.
+Only use comments to explain complex, multi-line blocks of code. Do not comment
+obvious operations.
 
 ### Docstring Format
 
-Use Sphinx-style docstrings with `:param:` / `:returns:` / `:raises:`
-syntax. For simple functions, a single-line docstring is fine.
+Use Sphinx-style docstrings with `:param:` syntax. For simple functions, a
+single-line docstring is fine.
 
-Don't explain inner workings of the code in the docstrings (use inline
-comments for that if/when needed). The docstring should provide clarity
-to the **caller** of the function/method, not explain how it works
+Don't explain inner workings of the code in the docstrings (you can use inline
+comments for that if/when needed). The docstring should provide clarity to the
+**caller** of the function/method, not explain how it works
 technically/internally.
 
 ```python
@@ -63,68 +52,72 @@ def my_function(param1: str, param2: int, param3: bool = False) -> str:
     """
 ```
 
-Do **not** use Google-style (`Args:`) or bullet-style (`- param:`)
-docstrings. AI assistants tend to generate Google-style by default —
-explicitly steer them to Sphinx, and rewrite anything that slips
-through.
-
-### Provider style
-
-- Match the layering of `provider/dialogs*.py`: webhook handler →
-  parsers (`dialogs_nlu.py`, `dialogs_control.py`, `dialogs_grammar.py`)
-  → resolvers (`dialogs_player.py`). Keep network I/O in the handler;
-  parsers and resolvers are pure or take `mass: MusicAssistant` as a
-  dependency.
-- Public-network inputs (URLs, hostnames, host headers) MUST go through
-  `is_public_https_url` from `provider/url_helpers.py` — both
-  `build_backend_uri` and the webhook probe rejected this in code
-  review (PR #3843, v1.2.2 fix). Never gate on scheme alone.
-- `from __future__ import annotations` at the top of every Python file.
+Do **not** use Google-style (`Args:`) or bullet-style (`- param:`) docstrings.
+AI assistants tend to generate Google-style by default — explicitly steer them
+to Sphinx, and rewrite anything that slips through.
 
 ## Branching and PRs
 
-- Default branch: `dev`. All work-in-progress PRs target `dev`.
-- Long-lived feature branches: `feat/<topic>` (e.g. `feat/platform-integration`).
-  Merge to `dev` once the feature lands.
-- Versioned bugfixes go through `dev` too; tags / releases happen on
-  `dev` after sync to upstream completes.
+- All work-in-progress PRs target `dev` (primary development branch).
+- Before opening a PR: run lint + tests + `pre-commit run --all-files`. CI runs `ruff format --check`, so pushing without `ruff format` is the most common red build.
 
-## Sync to upstream
+## Pull Request Workflow
 
-`ma-provider-tools` runs the sync workflow that propagates `provider/`
-and `tests/` from this repo into `music-assistant/server` under their
-canonical paths. Do not edit files inside `music-assistant/server/`
-directly — changes there are overwritten on the next sync.
+All non-trivial changes go through a pull request — never push directly to
+`dev`. Inside a PR, follow this loop:
 
-CI in upstream `music-assistant/server` is the moderation gate; review
-threads (e.g. PR #3843) drive bug fixes here, then a re-sync clears
-them upstream. The CHANGELOG entries in this repo are the source of
-truth for what landed.
+1. **Self-review.** Run at least one self-review pass on the diff (e.g. the
+   `/code-review` skill or an equivalent reviewer) before asking for human
+   review.
+2. **Copilot triage.** Check the PR for GitHub Copilot review comments. For
+   each comment: analyze it, apply a fix when warranted, reply with a short
+   justification, and resolve the thread.
+3. **Version + changelog.** *After* review feedback is addressed, bump the
+   `VERSION` file (PEP 440 — `1.2.0` stable, `1.2.0b1` beta) and add a
+   `CHANGELOG.md` entry — in the same PR. The release pipeline tags and
+   publishes automatically when the new `VERSION` lands on `dev`.
+4. **Ask before merging.** Always request explicit maintainer approval to
+   merge. Do not self-merge or enable auto-merge without it. (Auto-merge is
+   reserved for `distribute.yml`-generated wrapper-sync PRs from
+   `ma-provider-tools`.)
+
+Follow-up commits driven by review (your own pass or Copilot's) land directly
+on the PR branch — no separate PR needed.
+
+## Upstream is Read-Only
+
+Never push to or open PRs against the upstream Music Assistant repo
+(`music-assistant/server` — the true upstream) or the integration fork
+(`trudenboy/ma-server`) without an explicit maintainer instruction. The
+provider repo is the source of truth; sync to the integration fork and
+upstream PR submission run automatically through `ma-provider-tools`
+workflows (`sync-to-fork.yml`, `upstream-pr.yml`).
+
+This provider is intended to be inlined into
+`music_assistant/providers/yandex_alice` upstream eventually — that is the
+target shape, not a possibility. Any code that lints / type-checks here
+must lint / type-check identically upstream.
+
+## Auto-Synced Lint & Typing Config
+
+`ruff.toml`, `[tool.mypy]`, and `[tool.codespell].skip` mirror upstream
+`music-assistant/server/pyproject.toml` and are regenerated by
+`ma-provider-tools` (`scripts/sync_upstream_config.py`, weekly cron).
+**Do not hand-edit these in the provider repo** — the
+`Check config sync` GitHub Action will fail any PR that drifts. To change
+a rule, open a PR in `trudenboy/ma-provider-tools`; once merged, the
+distribute workflow propagates the change here.
+
+Provider-specific carve-outs that do *not* drift: `python_version`,
+`packages = ["tests", "provider"]`, the `[[tool.mypy.overrides]]`
+block, and `codespell.ignore-words-list`.
 
 ## Debugging
 
-- Music Assistant data: `$HOME/.musicassistant/`
-- MA logs: `$HOME/.musicassistant/musicassistant.log` (current),
-  `musicassistant.log.1` etc. for older rotated logs
-- MA database: `$HOME/.musicassistant/library.db` — query via `sqlite3`.
+Music Assistant stores its data in `$HOME/.musicassistant/`. When debugging
+locally:
+
+- **Logs:** `$HOME/.musicassistant/musicassistant.log` (current),
+  `musicassistant.log.1`, `.log.2`, etc. for older rotated logs.
+- **Database:** `$HOME/.musicassistant/library.db` — query via `sqlite3`.
   **Only execute SELECT queries** — never write to a live database.
-- Webhook traffic during local testing: tail the MA log filtered by
-  `Webhook recv:` (the structured DEBUG line emitted on every Yandex
-  request). Bumping the dialog logger to DEBUG via
-  `python -m music_assistant --log-level debug` is enough.
-
-## Other notes
-
-- The plugin reuses Yandex Passport cookies via `ya-passport-auth` and
-  the `app-store-api` REST surface via `ya-dialogs-api`. Both packages
-  are owned by this same author; bump versions in `pyproject.toml` +
-  `provider/manifest.json` together.
-- Tests never make live Yandex calls. Mock `aiohttp.ClientSession` per
-  the pattern in `tests/test_auto_create.py` if a new test needs HTTP.
-- Webhook handler error handling (PR #3843 review thread): the
-  post-auth dispatch is wrapped in `try / except` (`_handle_webhook` →
-  `_handle_authenticated_request`) so a parse / dispatch error surfaces
-  as a Russian "что-то пошло не так" reply instead of HTTP 500 → Alice
-  silence. Keep this guarantee intact when modifying the handler — any
-  new branch should also satisfy the
-  `test_unexpected_inner_exception_returns_graceful_fallback` test.
