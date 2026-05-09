@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-09
+
+### Added
+
+- **Runtime mapping in the skill manifest.** Each `[[intents]]` block
+  in `skill.toml` now carries an `[intents.runtime]` section that
+  declares how the matched intent translates to a player action —
+  `kind`, `action`, optional `[[intents.runtime.mapping]]` rules
+  (clamp / abs_clamp ranges, default values, sign, multiplicative
+  unit conversion, reject thresholds). Adding or tuning an intent no
+  longer requires Python changes; the manifest is the single source
+  of truth.
+- **File-based manifest override.** Drop a fully-formed manifest at
+  `<storage>/yandex_alice/skill.toml` and the provider uses it
+  instead of the bundled default for both grammar deployment to
+  Yandex and runtime intent dispatch. Invalid overrides fall back to
+  the bundled default with a warning rendered in the UI.
+- **Manifest UI section** (under Settings) exposes manifest status
+  (bundled / override active / override invalid + parse error) plus
+  four actions:
+  - *Export manifest* — write the bundled default to the override
+    path so it can be edited in an external editor.
+  - *Import manifest* — paste full TOML into the form and have it
+    validated and written to the override path. Supports a
+    `data:base64,<base64>` prefix for browsers that strip newlines
+    from text inputs.
+  - *Validate manifest* — re-parse the override file and report
+    structural / schema errors without redeploying to Yandex.
+  - *Reset manifest* — delete the override file and revert to the
+    bundled default. Idempotent.
+
+### Changed
+
+- **Bump `ya-dialogs-api` → 2.4.0** for the new `ManifestRuntime` /
+  `ManifestMapping` schema and the `apply_runtime_mapping` runtime
+  dispatcher.
+- **Skill grammar / entity builders are now class-based.** The
+  module-level `build_grammar()` / `build_entities()` /
+  `parse_platform_intent` functions in `dialogs_grammar.py` are gone;
+  the new `SkillManifestProvider` (constructed from `mass`) is the
+  single entry point for reading the effective manifest, dispatching
+  intents, and managing override-file lifecycle.
+
+### Removed
+
+- Hard-coded `_CONTROL_INTENT_MAP`, `_DEFAULT_VOLUME_DELTA`,
+  `_MAX_SEEK_SECONDS`, and the slot-extraction helpers
+  (`_slot_int` / `_slot_str`) from `dialogs_grammar.py` — every
+  numeric constant and dispatch rule now lives in the manifest.
+
 ## [1.5.0] - 2026-05-09
 
 ### Added
