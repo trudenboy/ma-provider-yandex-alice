@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-05-09
+
+### Fixed
+
+- **«Какие колонки видишь?» didn't classify as `control.list_players`**
+  on a live skill. The v1.4.0 grammar covered only `какие колонки`
+  without the trailing `видишь` / `знаешь` / `есть` qualifier that
+  most users actually say, so the phrase fell through to the play
+  parser, hit a multi-player disambiguation prompt, and then
+  contaminated session state for the next utterance. Extended
+  `_LIST_PLAYERS_GRAMMAR` with the missing variants:
+  `сколько колонок видишь / ты видишь / знаешь / ты знаешь`,
+  `какие колонки видишь / ты видишь / знаешь / ты знаешь / есть`.
+  Pinned `%lemma` standalone at the top so morphology of `видеть`
+  / `знать` is matched too.
+- **`now_playing` grammar likewise broadened.** Added `что за
+  композиция`, `какой трек`, `какой сейчас трек`, `какая песня`,
+  `какая сейчас песня` — phrasings that already existed in the
+  pre-v1.4.0 regex parser but didn't make it into the platform
+  grammar.
+
 ## [1.4.3] - 2026-05-09
 
 ### Fixed
