@@ -142,9 +142,10 @@ _NA_BOUNDARY_RE = re.compile(r"\s+на\s+", re.IGNORECASE)
 # - ``_HINT_UNIT_WORDS`` covers unit nouns that follow numeric slots
 #   ("на 30 секунд", "на 50 процентов").
 # - ``_HINT_ACTION_WORDS`` covers action-content nouns from grammars
-#   that themselves use "на <noun>" (currently only "паузу" from
-#   ``_PAUSE_GRAMMAR`` — "поставь на паузу" / "на паузу"). When a new
-#   intent grammar introduces another such token, add it here.
+#   that themselves use "на <noun>" (currently only "паузу" from the
+#   ``control.pause`` intent in skill.toml — "поставь на паузу" / "на
+#   паузу"). When a new intent grammar introduces another such token,
+#   add it here.
 _HINT_UNIT_WORDS: frozenset[str] = frozenset(
     {
         "секунда",
