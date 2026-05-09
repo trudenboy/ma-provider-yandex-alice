@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-05-09
+
+### Fixed
+
+- **Skill update click failed with «Form name already exists».** The
+  rename / drift-sync flow listed existing intents on the skill but
+  Yandex's bulk listing endpoint omits `formName` from the response,
+  so every server-side intent was invisible to the diff/upsert
+  protocol. The library treated each declared intent as new, POSTed a
+  fresh empty shell, then PATCHed the shell with a `formName` that
+  another (already-named) intent had reserved on the server — the API
+  rejected the PATCH. Picks up `ya-dialogs-api==2.1.2` which fans out
+  to the per-intent endpoint to populate `formName` / `sourceText` /
+  tests, so updates are now idempotent on a populated skill: matching
+  intents are PATCHed in place and stale empty intents from earlier
+  failed attempts are pruned.
+
+### Changed
+
+- **Bumps `ya-dialogs-api==2.1.2`.**
+
 ## [1.3.6] - 2026-05-09
 
 ### Fixed
