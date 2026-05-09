@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-09
+
+### Added
+
+- **`provider/data/skill.toml` — declarative skill manifest.** All
+  24 intents and the single `time_unit` custom entity that used to
+  live as Python string constants in `provider/dialogs_grammar.py`
+  now live in a TOML file. Each `grammar = """…"""` block carries
+  the Granet `sourceText` byte-for-byte, so phrasings can be
+  copy-pasted to and from the dev-console editor at
+  `https://dialogs.yandex.ru/developer/skills/<id>/draft/settings/intents`.
+  Field names mirror Yandex API names in snake_case
+  (`form_name` ↔ `formName`, `human_readable_name` ↔
+  `humanReadableName`, etc.).
+
+  The TOML format and its validator live in `ya_dialogs_api.manifest`
+  (added in lib v2.3.0). If Yandex changes the on-the-wire shape
+  the absorption point is in the library, not here.
+
+### Changed
+
+- **Bump `ya-dialogs-api` → 2.3.0** for the new
+  `SkillManifest` / `parse_manifest_text` / `iter_intent_matches`
+  APIs.
+- **`build_grammar()` and `build_entities()` now load from the
+  manifest.** Behaviour is identical to v1.4.4; the change is purely
+  storage-layer (Python constants → TOML file).
+- **`parse_platform_intent` consumes `IntentMatch.slot_int` /
+  `slot_str`** from `ya_dialogs_api.nlu` instead of reaching into
+  the raw `nlu.intents.<form>.slots[name].value` dict. Provider no
+  longer depends on the wire shape of slot payloads.
+
+### Removed
+
+- Provider-local `_*_GRAMMAR` string constants and the
+  `TIME_UNIT_ENTITY` literal — replaced by the TOML manifest.
+- Provider-local `_slot_int` / `_slot_str` helpers — moved to the
+  library as `IntentMatch.slot_int` / `IntentMatch.slot_str`.
+
 ## [1.4.4] - 2026-05-09
 
 ### Fixed
