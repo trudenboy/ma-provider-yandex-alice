@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-05-09
+
+### Fixed
+
+- Music Assistant failed to start with the provider installed —
+  bundled-resource lookup hardcoded the source-tree package name
+  (`provider.data`), which doesn't exist after the upstream sync
+  renames the package to `music_assistant.providers.yandex_alice`.
+  The lookup now resolves through `__package__` so it works in both
+  the source tree and the upstream-synced layout.
+
 ## [1.6.0] - 2026-05-09
 
 ### Added
