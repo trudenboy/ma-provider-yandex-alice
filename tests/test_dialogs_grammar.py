@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+import importlib.resources
 from typing import Any
 
 import pytest
@@ -327,6 +328,19 @@ class TestExtractTrailingPlayerHint:
 
 class TestBuildersConsistency:
     """build_grammar / build_entities — declarative state must round-trip."""
+
+    def test_skill_toml_resource_is_packaged(self) -> None:
+        """``provider/data/skill.toml`` must be reachable via importlib.resources.
+
+        Guard against the packaging foot-gun where ``provider/data/``
+        lacks an ``__init__.py`` and ``setuptools.find_packages``
+        silently drops the directory from the built wheel — the
+        manifest then can't be loaded after a pip install.
+        """
+        ref = importlib.resources.files("provider.data").joinpath("skill.toml")
+        text = ref.read_text(encoding="utf-8")
+        assert "schema_version" in text
+        assert "control.pause" in text
 
     def test_build_entities_returns_time_unit(self) -> None:
         entities = build_entities()
