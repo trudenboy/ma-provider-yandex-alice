@@ -10,7 +10,7 @@
 
 **📖 [Documentation / Документация](https://trudenboy.github.io/ma-provider-yandex-alice/)** · **🔄 [Changelog / Журнал](CHANGELOG.md)** · **🐛 [Issues / Проблемы](https://github.com/trudenboy/ma-provider-yandex-alice/issues)** · **💬 [Discussions / Обсуждения](https://github.com/trudenboy/ma-provider-yandex-alice/discussions)**
 
-**Related providers:** [Yandex Smart Home](https://github.com/trudenboy/ma-provider-yandex-smarthome) · [Yandex Station](https://github.com/trudenboy/ma-provider-yandex-station)
+**Related providers:** [Yandex Smart Home](https://github.com/trudenboy/ma-provider-yandex-smarthome) · [Yandex Station](https://github.com/trudenboy/ma-provider-yandex-station) · [Yandex Music](https://github.com/trudenboy/ma-provider-yandex-music)
 <!-- <<< ma-provider-tools sync (readme header) <<< -->
 
 Music Assistant plugin provider that exposes MA players to **Yandex Alice via a
