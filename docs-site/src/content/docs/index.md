@@ -16,7 +16,7 @@ description: Документация провайдера Yandex Alice для M
 [![Stars](https://img.shields.io/github/stars/trudenboy/ma-provider-yandex-alice?style=flat&logo=github)](https://github.com/trudenboy/ma-provider-yandex-alice/stargazers)
 
 
-<div class="topic-pills"> <code>music-assistant</code> <code>home-assistant</code> <code>python</code> <code>plugin-provider</code> <code>yandex</code> <code>voice-control</code> <code>voice-assistant</code> <code>алиса</code> <code>станция</code> <code>яндекс</code> <code>russian-nlu</code> <code>dialogs-api</code>
+<div class="topic-pills"> <code>music-assistant</code> <code>home-assistant</code> <code>python</code> <code>plugin-provider</code> <code>yandex</code> <code>voice-control</code> <code>voice-assistant</code> <code>alice</code> <code>station</code> <code>russian-nlu</code> <code>dialogs-api</code>
 </div>
 
 
