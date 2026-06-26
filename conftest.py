@@ -19,7 +19,7 @@ try:
     from enum import StrEnum as _StrEnum
 except ImportError:
 
-    class _StrEnum(str, Enum):  # type: ignore[no-redef]  # noqa: UP042
+    class _StrEnum(str, Enum):  # type: ignore[no-redef]
         """Backport of StrEnum for Python < 3.11."""
 
 
