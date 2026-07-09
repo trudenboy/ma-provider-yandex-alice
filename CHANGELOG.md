@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-09
+
+### Added
+
+- **Yandex account source**: the Authorization step can now borrow the Yandex account of a configured Yandex Music provider instead of running its own sign-in — one login for the whole household. Pick the source in the dropdown; "Use own credentials" remains the default and behaves exactly as before. When borrowing, the Sign-in/Sign-out buttons disappear, skill actions run on the linked account read-only (nothing is stored or rotated by this plugin), and an unavailable Yandex Music instance shows an actionable message instead of breaking the form.
+
 ## [1.6.2] - 2026-07-09
 
 ### Changed
