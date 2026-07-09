@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-07-09
+
+### Changed
+
+- The Yandex Passport sign-in page now comes from the shared `ya-passport-auth[ma]` layer used by all Music Assistant yandex providers: Russian/English localization, dark-theme support, tap-to-copy code, an honest countdown of the code's remaining lifetime, and clear terminal states explaining why a sign-in failed (expired / denied / error). The page keeps its skill-registration explanation.
+- The sign-in action returns the moment the outcome is known instead of pausing for a grace period; the page keeps polling in the background and closes itself.
+- Transient Yandex Passport failures (network, rate limiting) now surface as "temporarily unavailable" instead of a sign-in failure.
+
 ## [1.6.1] - 2026-05-09
 
 ### Fixed
