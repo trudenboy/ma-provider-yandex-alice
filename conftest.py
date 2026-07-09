@@ -96,6 +96,13 @@ class _QueueOption(_StrEnum):
     UNKNOWN = "unknown"
 
 
+class _ProviderType(_StrEnum):
+    MUSIC = "music"
+    PLAYER = "player"
+    METADATA = "metadata"
+    PLUGIN = "plugin"
+
+
 _ensure_module(
     "music_assistant_models.enums",
     {
@@ -106,6 +113,7 @@ _ensure_module(
         "MediaType": _MediaType,
         "RepeatMode": _RepeatMode,
         "QueueOption": _QueueOption,
+        "ProviderType": _ProviderType,
     },
 )
 
@@ -118,9 +126,11 @@ class _ConfigEntry:
 
 
 class _ConfigValueOption:
-    def __init__(self, title="", value=None):
-        self.title = title
+    # Mirrors music_assistant_models.config_entries.ConfigValueOption:
+    # ``value`` first, optional ``title``.
+    def __init__(self, value=None, title=None):
         self.value = value
+        self.title = title
 
 
 _ensure_module(
