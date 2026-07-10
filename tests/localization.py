@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-_STRINGS_PATH = Path(__file__).resolve().parent.parent / "provider" / "strings.json"
-
 
 @lru_cache(maxsize=1)
 def load_strings() -> dict[str, Any]:
-    """Parse the provider ``strings.json`` once per test session."""
-    data: dict[str, Any] = json.loads(_STRINGS_PATH.read_text(encoding="utf-8"))
+    """Parse the provider ``strings.json`` once per test session.
+
+    The file is located through the provider package itself, so the
+    lookup works in both the source tree (``provider/``) and the
+    upstream-synced layout (``music_assistant/providers/yandex_alice/``).
+    """
+    provider_pkg = importlib.import_module("music_assistant.providers.yandex_alice")
+    strings_path = Path(str(provider_pkg.__file__)).parent / "strings.json"
+    data: dict[str, Any] = json.loads(strings_path.read_text(encoding="utf-8"))
     return data
 
 
