@@ -81,7 +81,8 @@ _FORM_STATES: dict[str, dict[str, Any]] = {
 
 
 async def _render(values: dict[str, Any]) -> tuple[Any, ...]:
-    return await get_config_entries(_make_mass(), values=dict(values))
+    entries: tuple[Any, ...] = await get_config_entries(_make_mass(), values=dict(values))
+    return entries
 
 
 @pytest.mark.asyncio
