@@ -373,9 +373,12 @@ async def get_config_entries(  # noqa: PLR0915
                 )
             else:
                 cached_x_token = borrowed_x.get_secret()
+    # The static "own credentials" option title is authored in strings.json
+    # (config_entries.ym_instance.options.__own__); instance titles are
+    # data-driven and stay code-composed.
     borrow_options = [
         *(ConfigValueOption(inst_id, f"Yandex Music: {name}") for inst_id, name in ym_instances),
-        ConfigValueOption(BORROW_SOURCE_OWN, "Use own credentials (default)"),
+        ConfigValueOption(BORROW_SOURCE_OWN),
     ]
     skill_token_value = _resolve_secure_string_from(saved_provider, values, CONF_DIALOG_SKILL_TOKEN)
     # Carried across renders unless a deploy-related action below

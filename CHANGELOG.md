@@ -13,8 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - All settings-form texts (labels, descriptions, button captions) are now
   served through Music Assistant's translation system (`strings.json`),
-  making the configuration UI localizable. The English texts themselves
-  are unchanged.
+  making the configuration UI localizable. English wording is preserved,
+  except the alternative-activation-phrase fields now use one shared
+  label/description in both the Edit and Advanced views.
+- The provider is now marked as **experimental** (was beta) in the
+  provider list.
 
 ## [1.7.1] - 2026-07-09
 

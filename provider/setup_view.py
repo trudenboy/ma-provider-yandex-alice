@@ -36,8 +36,6 @@ runtime by the dispatcher (outcome / update messages) keep passing
 ``strings.json`` so the in-code text survives serialization.
 """
 
-# ruff: noqa: RUF002
-
 from __future__ import annotations
 
 import contextlib
@@ -120,7 +118,7 @@ def _publication_status_banner(
     * ⏳ in-moderation (waiting) — ALERT
     * ❌ rejected (error) — ALERT
     * ⚠️ draft (needs user action) — ALERT
-    * ℹ️ unknown / not yet fetched — LABEL
+    * info icon: unknown / not yet fetched — LABEL
     """
     if status == STATUS_ON_AIR:
         return ("pub_status_on_air", ConfigEntryType.LABEL)
@@ -158,6 +156,8 @@ def _stamp(entries: Iterable[ConfigEntry], category: str) -> tuple[ConfigEntry, 
         if current and current != "generic":
             out.append(e)
             continue
+        # dataclasses.replace fails on non-dataclass ConfigEntry stand-ins
+        # (the test suite's conftest stub); fall back to attribute set.
         try:
             out.append(dataclasses.replace(e, category=category))
         except (TypeError, ValueError):
@@ -196,6 +196,7 @@ def _authorization_block(
                 ConfigEntry(
                     key="label_auth_borrow_error",
                     type=ConfigEntryType.ALERT,
+                    translation_key="alert_error",
                     translation_params=[borrow_error],
                 )
             )
@@ -207,13 +208,26 @@ def _authorization_block(
         )
         return tuple(borrowed)
     if signed_in:
-        return (
-            source_entry,
+        # Anonymous variant: a params-injected English fallback would
+        # stay untranslated inside a localized sentence, so the no-name
+        # case gets its own authored text instead.
+        display_name = user_name.strip()
+        status_entry = (
             ConfigEntry(
                 key="label_auth_status",
                 type=ConfigEntryType.LABEL,
-                translation_params=[user_name.strip() or "Yandex account"],
-            ),
+                translation_params=[display_name],
+            )
+            if display_name
+            else ConfigEntry(
+                key="label_auth_status",
+                type=ConfigEntryType.LABEL,
+                translation_key="label_auth_status_anonymous",
+            )
+        )
+        return (
+            source_entry,
+            status_entry,
             ConfigEntry(
                 key=CONF_ACTION_CLEAR_AUTH,
                 type=ConfigEntryType.ACTION,
@@ -229,6 +243,7 @@ def _authorization_block(
             ConfigEntry(
                 key="label_auth_last_error",
                 type=ConfigEntryType.ALERT,
+                translation_key="alert_error",
                 translation_params=[last_error],
             )
         )
@@ -334,12 +349,21 @@ def _skill_create_subblock(
         return tuple(entries)
 
     if stage == LocalAutoCreateStage.FAILED:
-        err = (artifacts.last_error or "Unknown error.").strip()
+        # No-detail variant gets its own authored text — an English
+        # "Unknown error." injected via params would stay untranslated.
+        err = (artifacts.last_error or "").strip()
         entries.append(
             ConfigEntry(
                 key="label_skill_failed",
                 type=ConfigEntryType.ALERT,
+                translation_key="alert_error",
                 translation_params=[err],
+            )
+            if err
+            else ConfigEntry(
+                key="label_skill_failed",
+                type=ConfigEntryType.ALERT,
+                translation_key="label_skill_failed_unknown",
             )
         )
         if external_base_url:
@@ -540,6 +564,7 @@ def _skill_registered_subblock(
         ConfigEntry(
             key=CONF_DIALOG_SKILL_NAME,
             type=ConfigEntryType.STRING,
+            translation_key="dialog_skill_name_edit",
             required=False,
             value=skill_name,
             default_value="",
@@ -638,6 +663,7 @@ def _skill_advanced_subblock(  # noqa: PLR0913
             ConfigEntry(
                 key=CONF_DIALOG_SKILL_NAME,
                 type=ConfigEntryType.STRING,
+                translation_key="dialog_skill_name_advanced",
                 required=False,
                 value=skill_name,
                 default_value="",
@@ -725,6 +751,7 @@ def _skill_advanced_subblock(  # noqa: PLR0913
             ConfigEntry(
                 key=CONF_DIALOG_SKILL_VOICE,
                 type=ConfigEntryType.STRING,
+                translation_key="dialog_skill_voice_advanced",
                 required=False,
                 value=voice or DIALOG_VOICE_DEFAULT,
                 default_value=DIALOG_VOICE_DEFAULT,
@@ -860,30 +887,23 @@ def _manifest_block(
     player actions. Bundled by default; users override by writing
     ``<storage>/yandex_alice/skill.toml`` (manually or via Import).
     """
+    counts = [str(status.intent_count), str(status.entity_count)]
     if status.source == "bundled":
-        banner = (
-            f"Skill manifest: bundled default "
-            f"({status.intent_count} intents, {status.entity_count} entities). "
-            f"Use Export to copy it to {status.override_path} for editing."
-        )
+        banner_key = "manifest_banner_bundled"
+        banner_params = [*counts, str(status.override_path)]
     elif status.source == "override_valid":
-        banner = (
-            f"Skill manifest: override active at {status.override_path} "
-            f"({status.intent_count} intents, {status.entity_count} entities)."
-        )
+        banner_key = "manifest_banner_override"
+        banner_params = [str(status.override_path), *counts]
     else:  # override_invalid
-        banner = (
-            f"⚠ Skill manifest: override at {status.override_path} is invalid — "
-            f"falling back to bundled default ({status.intent_count} intents, "
-            f"{status.entity_count} entities). "
-            f"Error: {status.error or 'unknown parse error'}"
-        )
+        banner_key = "manifest_banner_invalid"
+        banner_params = [str(status.override_path), *counts, status.error or "unknown parse error"]
 
     entries: list[ConfigEntry] = [
         ConfigEntry(
             key="label_manifest_banner",
             type=ConfigEntryType.LABEL,
-            label=banner,
+            translation_key=banner_key,
+            translation_params=banner_params,
         ),
     ]
     if update_message:
