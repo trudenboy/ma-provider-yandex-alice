@@ -977,7 +977,7 @@ name = "ma-provider-yandex-alice"
 source = { editable = "." }
 dependencies = [
     { name = "ya-dialogs-api" },
-    { name = "ya-passport-auth" },
+    { name = "ya-passport-auth", extra = ["ma"] },
 ]
 
 [package.optional-dependencies]
@@ -1009,7 +1009,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.14,<0.15" },
     { name = "syrupy", marker = "extra == 'test'", specifier = ">=5.0" },
     { name = "ya-dialogs-api", specifier = ">=2.0.0" },
-    { name = "ya-passport-auth", specifier = ">=1.4.1" },
+    { name = "ya-passport-auth", extras = ["ma"], specifier = "==1.7.0" },
 ]
 provides-extras = ["test"]
 
@@ -1224,10 +1224,10 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "python-slugify" },
     { name = "shortuuid" },
-    { name = "torch", version = "2.12.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.12.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
-    { name = "torchaudio", version = "2.11.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torchaudio", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+    { name = "torch", version = "2.12.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.12.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "torchaudio", version = "2.11.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "torchaudio", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
     { name = "unidecode" },
     { name = "uv" },
     { name = "xmltodict" },
@@ -2088,17 +2088,16 @@ name = "torch"
 version = "2.12.1"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'darwin'",
     "python_full_version < '3.15' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "sys_platform == 'darwin'" },
-    { name = "fsspec", marker = "sys_platform == 'darwin'" },
-    { name = "jinja2", marker = "sys_platform == 'darwin'" },
-    { name = "networkx", marker = "sys_platform == 'darwin'" },
-    { name = "setuptools", marker = "sys_platform == 'darwin'" },
-    { name = "sympy", marker = "sys_platform == 'darwin'" },
-    { name = "typing-extensions", marker = "sys_platform == 'darwin'" },
+    { name = "filelock", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "fsspec", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "jinja2", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "networkx", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "setuptools", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "sympy", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:e9b6f7d2dd66ea87a3ae620069d31335d594c06effb1a383bdd21cfe61e44ece", upload-time = "2026-06-17T15:44:16Z" },
@@ -2112,15 +2111,16 @@ source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform != 'darwin'",
     "python_full_version < '3.15' and sys_platform != 'darwin'",
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "sys_platform != 'darwin'" },
-    { name = "fsspec", marker = "sys_platform != 'darwin'" },
-    { name = "jinja2", marker = "sys_platform != 'darwin'" },
-    { name = "networkx", marker = "sys_platform != 'darwin'" },
-    { name = "setuptools", marker = "sys_platform != 'darwin'" },
-    { name = "sympy", marker = "sys_platform != 'darwin'" },
-    { name = "typing-extensions", marker = "sys_platform != 'darwin'" },
+    { name = "filelock", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "fsspec", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "jinja2", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "networkx", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "setuptools", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "sympy", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp314-cp314-linux_s390x.whl", hash = "sha256:ef228ec70f5e73762c213f145c0fdb672e5770a6de760801c58b933b0d5b6957", upload-time = "2026-06-18T01:58:09Z" },
@@ -2138,7 +2138,6 @@ name = "torchaudio"
 version = "2.11.0"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'darwin'",
     "python_full_version < '3.15' and sys_platform == 'darwin'",
 ]
 wheels = [
@@ -2153,6 +2152,7 @@ source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform != 'darwin'",
     "python_full_version < '3.15' and sys_platform != 'darwin'",
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torchaudio-2.11.0%2Bcpu-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:591ed8279f0170ef28933873f65e9f5f8c439287088ef6285cda65988b0ba614", upload-time = "2026-03-23T15:50:10Z" },
@@ -2264,15 +2264,20 @@ wheels = [
 
 [[package]]
 name = "ya-passport-auth"
-version = "1.5.0"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "yarl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/1a/22a1dab06db72a3688a1dba15fd514ccdf75903adec1c243f0ee7c3d5bd3/ya_passport_auth-1.5.0.tar.gz", hash = "sha256:551d64febfae04b97e64621e91e82fe09250d378b92e97b537949472bdcfe90c", size = 60310, upload-time = "2026-05-27T14:33:21.005Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/b9/29f2efafcae6259639785924739af2e32ad2ddd81a5c1c5ae7b544efbd98/ya_passport_auth-1.7.0.tar.gz", hash = "sha256:ba89a5ce72811b1beedc7e1cb6832b54548506c8ccd3220147bb15050e6d3e8f", size = 101187, upload-time = "2026-07-09T17:23:55.539Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/99/3ff3147917d6a93e4387c765566a9e5f0b8941d4f9526491c46442cf3eb7/ya_passport_auth-1.5.0-py3-none-any.whl", hash = "sha256:3aa60b658e061b1fb48b51daf2adf72025232855214fa4112e160342651debf6", size = 41689, upload-time = "2026-05-27T14:33:19.426Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/78/6d757f22f0a7113e0bbdf88e2c2a47f776e6f6d5c8ef816a04abe192661b/ya_passport_auth-1.7.0-py3-none-any.whl", hash = "sha256:c4787963db3ff31d4c72b1d33db92fe6eac88f5e6f7382bb120300cb06fc04db", size = 71465, upload-time = "2026-07-09T17:23:54.339Z" },
+]
+
+[package.optional-dependencies]
+ma = [
+    { name = "music-assistant-models" },
 ]
 
 [[package]]
