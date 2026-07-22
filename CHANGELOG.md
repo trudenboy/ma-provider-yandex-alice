@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.5] - 2026-07-22
+
+### Fixed
+
+- Background playback and queue-transfer failures are now logged at the
+  default error level instead of disappearing inside Music Assistant's task
+  tracker.
+- Control commands consistently clear stale disambiguation state from the
+  session, application, and in-process fallback tiers.
+- The webhook reachability probe now rejects DNS answers that resolve to
+  non-public addresses, rejects `localhost.` aliases, and does not follow HTTP
+  redirects to unchecked destinations.
+- Manifest export/import/reset/validation results now use translation keys
+  instead of hard-coded Russian UI messages.
+
+### Changed
+
+- The effective skill manifest is loaded once at provider startup or config
+  action time and used as an in-memory runtime snapshot. Explicit manifest
+  actions activate the refreshed snapshot; direct external file edits require
+  a provider reload. This removes synchronous file polling from every webhook.
+
 ## [1.7.3] - 2026-07-10
 
 ### Changed
