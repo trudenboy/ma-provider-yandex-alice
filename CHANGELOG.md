@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-26
+
+### Added
+
+- Optional AI answers (`CONF_AI_FALLBACK`, off by default): questions that are
+  not music commands — «почему небо голубое», «расскажи про эту группу» — are
+  answered by a Music Assistant AI engine picked in `CONF_AI_ENGINE` (any AI
+  plugin, e.g. OpenAI-compatible) instead of starting a music search. The
+  prompt includes the track playing on your player and the last three
+  exchanges, so follow-ups like «а сколько ему лет» work; «включи …» still
+  plays music.
+- When the AI engine needs longer than Alice's response window, the skill
+  says «Секунду, думаю…» and delivers the answer on «ну что».
+
 ## [1.8.0] - 2026-10-26
 
 ### Changed
