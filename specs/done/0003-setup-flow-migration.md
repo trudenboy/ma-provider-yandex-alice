@@ -2,7 +2,7 @@
 id: "0003"
 title: "Move sign-in and skill creation to the Music Assistant setup flow (MA 2.11, ya-passport-auth 2.2)"
 size: L
-status: inprogress
+status: done
 priority: P0
 effort_minutes: 120
 feature_id:
