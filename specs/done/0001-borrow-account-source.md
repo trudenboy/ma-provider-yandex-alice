@@ -2,7 +2,7 @@
 id: "0001"
 title: "Borrow the Yandex account from a linked Yandex Music provider"
 size: S
-status: inprogress
+status: done
 priority: P1
 effort_minutes: 10
 feature_id:

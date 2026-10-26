@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-26
+
+### Changed
+
+- Sign-in and skill creation moved to Music Assistant's setup flow, as
+  required by Music Assistant 2.10+ where the old options form no longer
+  works. Adding the provider now asks for the Yandex account (borrow a Yandex
+  Music provider's account, or sign in by code on ya.ru/device, QR code or
+  browser cookies), then creates the Yandex Dialogs skill or registers one you
+  made by hand. Reconfigure the provider to sign in again, edit the skill,
+  change its public address or webhook secret, or create it again.
+- The options page now shows the account, the skill and its publication
+  status and webhook URL, with Test webhook, Refresh status, Open developer
+  console, Delete skill and the manifest tools. Import the manifest by saving
+  the pasted TOML first, then pressing Import.
+- Requires `ya-passport-auth[ma]` 2.2.0 (shared with the other Yandex
+  providers) and `segno` for the QR code.
+
+### Fixed
+
+- The provider failed to load with `ya-passport-auth` 2.x because it still
+  used the removed hosted device-code page.
+- Existing installs keep their sign-in, skill and webhook secret: they are
+  carried over into the new setup data automatically.
+
 ## [1.7.5] - 2026-07-22
 
 ### Fixed
