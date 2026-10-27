@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The webhook test result, publication-status refresh, skill deletion and
+  diagnostics summary messages in the provider settings are now translatable
+  instead of fixed English text.
 - The Alice repeat commands («повтори песню», «выключи повтор», «повторяй
   всё») now change the queue's repeat mode. On current Music Assistant
   versions they were accepted but had no effect.

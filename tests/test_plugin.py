@@ -364,7 +364,9 @@ async def test_test_webhook_reports_probe_result(
     plugin, _mass = _plugin(tmp_path)
     result = await plugin.handle_config_action(CONF_ACTION_TEST_WEBHOOK)
     probe.assert_awaited_once_with("https://ma.example.org", "secret-1")
-    assert result.message == "✅ Webhook reachable."  # type: ignore[union-attr]
+    # The outcome is localized from strings.json config_actions, not hardcoded.
+    assert result.translation_key == "webhook_probe_ok"  # type: ignore[union-attr]
+    assert result.translation_args == ["Webhook reachable."]  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
