@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-27
+
+### Fixed
+
+- A malformed request to the Alice skill webhook, and a failure while looking
+  up the Yandex Music provider for «Моя волна», are now written to the debug
+  log instead of being silently ignored, so these cases can be diagnosed.
+
 ## [1.9.0] - 2026-10-26
 
 ### Added
