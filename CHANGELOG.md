@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-27
+
+### Fixed
+
+- The webhook test result, publication-status refresh, skill deletion and
+  diagnostics summary messages in the provider settings are now translatable
+  instead of fixed English text.
+- The Alice repeat commands («повтори песню», «выключи повтор», «повторяй
+  всё») now change the queue's repeat mode. On current Music Assistant
+  versions they were accepted but had no effect.
+- A malformed request to the Alice skill webhook, and a failure while looking
+  up the Yandex Music provider for «Моя волна», are now written to the debug
+  log instead of being silently ignored, so these cases can be diagnosed.
+
 ## [1.9.0] - 2026-10-26
 
 ### Added
