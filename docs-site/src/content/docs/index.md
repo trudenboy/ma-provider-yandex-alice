@@ -21,7 +21,7 @@ description: Документация провайдера Yandex Alice для M
 
 
 
-Music Assistant поддерживает [Yandex Alice](https://dialogs.yandex.ru/developer) — плеер.
+Music Assistant поддерживает [Yandex Alice](https://dialogs.yandex.ru/developer) — плагин-провайдер.
 Провайдер создан и поддерживается [TrudenBoy](https://github.com/TrudenBoy).
 
 
